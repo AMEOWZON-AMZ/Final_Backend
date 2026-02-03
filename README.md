@@ -1,187 +1,104 @@
-# 마이크로서비스 Pod 구조 설계
+# 마이크로서비스 백엔드 아키텍처
 
-## 현재 상황
-- 사용자 pod만 구현됨
-- 추론pod, 사용자pod, 메시지pod로 확장 예정
+FastAPI 기반의 마이크로서비스 아키텍처로 구성된 백엔드 서비스입니다.
 
-## 제안하는 폴더 구조
+## 서비스 구조
 
+### 🏗️ 마이크로서비스
+- **User Service** (포트 8001): 사용자 관리, 인증, 친구 시스템
+- **Message Service** (포트 8002): 실시간 메시징 및 알림
+- **Inference Service** (포트 8003): AI/ML 모델 추론
+
+### 📁 프로젝트 구조
 ```
-project/
-├── common/                     # 공통 모듈
-│   ├── __init__.py
-│   ├── config/
-│   │   ├── __init__.py
-│   │   ├── base_config.py      # 기본 설정
-│   │   └── database_config.py  # DB 설정
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── base_model.py       # 공통 모델 베이스
-│   │   └── shared_models.py    # 공유 모델들
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── base_schema.py      # 공통 스키마
-│   │   └── shared_schemas.py   # 공유 스키마들
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── logger.py           # 로깅 유틸
-│   │   ├── auth_utils.py       # 인증 유틸
-│   │   └── validation.py       # 검증 유틸
-│   └── middleware/
-│       ├── __init__.py
-│       ├── cors.py
-│       └── error_handler.py
-│
-├── user_pod/                   # 사용자 관리 Pod
-│   ├── __init__.py
-│   ├── main.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── health.py
-│   │   └── v1/
-│   │       ├── __init__.py
-│   │       ├── api.py
-│   │       └── endpoints/
-│   │           ├── __init__.py
-│   │           ├── auth.py
-│   │           ├── users.py
-│   │           └── social.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   └── security.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── user.py
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── user.py
-│   │   └── response.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── user_service.py
-│   │   ├── friend_service.py
-│   │   └── social_auth_service.py
-│   └── tests/
-│       ├── __init__.py
-│       └── test_user_api.py
-│
-├── inference_pod/              # 추론 Pod
-│   ├── __init__.py
-│   ├── main.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── health.py
-│   │   └── v1/
-│   │       ├── __init__.py
-│   │       ├── api.py
-│   │       └── endpoints/
-│   │           ├── __init__.py
-│   │           ├── inference.py
-│   │           └── models.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   └── ml_engine.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── inference_request.py
-│   │   └── inference_result.py
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── inference.py
-│   │   └── model_schema.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── inference_service.py
-│   │   └── model_service.py
-│   └── tests/
-│       ├── __init__.py
-│       └── test_inference_api.py
-│
-├── message_pod/                # 메시지 Pod
-│   ├── __init__.py
-│   ├── main.py
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── health.py
-│   │   └── v1/
-│   │       ├── __init__.py
-│   │       ├── api.py
-│   │       └── endpoints/
-│   │           ├── __init__.py
-│   │           ├── messages.py
-│   │           ├── chat.py
-│   │           └── notifications.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py
-│   │   └── websocket.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── message.py
-│   │   └── chat_room.py
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── message.py
-│   │   └── chat.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── message_service.py
-│   │   ├── chat_service.py
-│   │   └── notification_service.py
-│   └── tests/
-│       ├── __init__.py
-│       └── test_message_api.py
-│
-├── docker/                     # Docker 설정
-│   ├── user_pod/
-│   │   └── Dockerfile
-│   ├── inference_pod/
-│   │   └── Dockerfile
-│   ├── message_pod/
-│   │   └── Dockerfile
-│   └── docker-compose.yml
-│
-├── scripts/                    # 배포/관리 스크립트
-│   ├── deploy.sh
-│   ├── migrate.sh
-│   └── test_all.sh
-│
-├── docs/                       # 문서
-│   ├── api/
-│   ├── architecture.md
-│   └── deployment.md
-│
-├── .env.example
-├── .gitignore
-├── requirements.txt
-└── README.md
+backend/
+├── services/
+│   ├── user_service/          # 사용자 관리 서비스
+│   ├── message_service/       # 메시징 서비스
+│   └── inference_service/     # 추론 서비스
+├── libs/common/               # 공통 라이브러리
+├── deploy/k8s/               # Kubernetes 배포 설정
+├── scripts/                  # 개발/배포 스크립트
+└── docs/                     # 문서
 ```
 
-## 각 Pod의 역할
+## 기술 스택
+- **Backend**: FastAPI + Python 3.11
+- **Database**: PostgreSQL / SQLite
+- **Authentication**: JWT + 소셜 로그인
+- **Container**: Docker + Kubernetes
+- **Monitoring**: Prometheus + Grafana
 
-### User Pod (사용자 관리)
-- 사용자 인증/인가
-- 프로필 관리
-- 친구 관계 관리
-- 소셜 로그인
+## 로컬 개발 환경
 
-### Inference Pod (추론 서비스)
-- AI/ML 모델 추론
-- 모델 관리
-- 추론 결과 캐싱
-- 모델 버전 관리
+### 1. 전체 서비스 실행
+```bash
+# 모든 서비스 시작
+make run-all
 
-### Message Pod (메시지 서비스)
-- 실시간 메시징
-- 채팅방 관리
-- 알림 서비스
-- 메시지 히스토리
+# 개별 서비스 실행
+make run-user-service
+make run-message-service
+make run-inference-service
+```
 
-### Common (공통 모듈)
-- 공통 설정 및 유틸리티
-- 공유 모델 및 스키마
-- 미들웨어
-- 로깅 및 모니터링
+### 2. Docker Compose 실행
+```bash
+docker-compose up -d
+```
+
+## API 문서
+- **User Service**: http://localhost:8001/docs
+- **Message Service**: http://localhost:8002/docs
+- **Inference Service**: http://localhost:8003/docs
+
+## 소셜 로그인 지원
+- 🟡 **카카오 로그인**
+- 🔴 **구글 로그인**
+- 🟢 **네이버 로그인**
+- 🍎 **애플 로그인** (iOS)
+
+## 개발 가이드
+
+### 새로운 서비스 추가
+1. `backend/services/` 에 새 서비스 디렉토리 생성
+2. 표준 구조 따라 구현 (app/, tests/, Dockerfile 등)
+3. K8s 배포 설정 추가
+
+### 공통 기능 추가
+- `backend/libs/common/` 에 공통 라이브러리 구현
+- 인증, 로깅, 설정 등 공유 기능
+
+## 배포
+
+### Kubernetes 배포
+```bash
+# 네임스페이스 생성
+kubectl apply -f deploy/k8s/namespaces/
+
+# 서비스 배포
+kubectl apply -f deploy/k8s/user_service/
+kubectl apply -f deploy/k8s/message_service/
+kubectl apply -f deploy/k8s/inference_service/
+```
+
+### 환경별 설정
+- `development`: 로컬 개발
+- `staging`: 스테이징 환경
+- `production`: 운영 환경
+
+## 모니터링
+- **헬스체크**: `/health` 엔드포인트
+- **메트릭**: Prometheus 수집
+- **로그**: 구조화된 JSON 로그
+
+## 테스트
+```bash
+# 전체 테스트
+make test-all
+
+# 개별 서비스 테스트
+make test-user-service
+make test-message-service
+make test-inference-service
+```
