@@ -1,6 +1,5 @@
 # 한 줄 정리
-msg-service는 쪽지/하트를 DynamoDB에 저장하고(사실 기록), Outbox로 푸시 이벤트를 유실 없이 남긴 뒤, SQS로 worker에게 “푸시 보내라” 작업을 전달하고, worker가 FCM을 호출해 수신자 폰에 알림을 띄운다.
-
+msg-service는 쪽지/하트를 DynamoDB에 저장(사실 기록)하고, Outbox로 푸시 이벤트를 유실 없이 남긴 뒤, SQS로 worker에게 ‘푸시 보내라’ 작업을 전달하며, worker가 FCM을 호출해 수신자 기기에 알림을 띄운다. 보낸함 UI는 제공하지 않되, 관리 대비 최소 AuditEvents 기록을 TTL로 보관한다.
 ---
 
 ## 1. 목표

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: msg-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: msg-service
+  template:
+    metadata:
+      labels:
+        app: msg-service
+    spec:
+      containers:
+        - name: msg-service
+          image: msg-service:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: msg-service-secrets
+            - configMapRef:
+                name: msg-service-config

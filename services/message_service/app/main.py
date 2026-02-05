@@ -1,1 +1,0 @@
-# Message Service Main Application
