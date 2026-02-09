@@ -1,0 +1,6 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: msg-service-config
+data:
+  APP_NAME: msg-service

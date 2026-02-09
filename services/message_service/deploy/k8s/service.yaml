@@ -3,9 +3,9 @@ kind: Service
 metadata:
   name: msg-service
 spec:
+  type: LoadBalancer
   selector:
     app: msg-service
   ports:
-    - protocol: TCP
-      port: 80
+    - port: 80
       targetPort: 8080

@@ -1,0 +1,69 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual Environment
+venv/
+.env/
+.env.*
+!.env.example
+
+# =========================
+# Secrets / Credentials
+# =========================
+*.pem
+*.key
+*.crt
+*.p12
+
+# AWS
+.aws/
+**/.aws/
+*.tfstate
+*.tfstate.*
+
+# Kubernetes secrets
+*kubeconfig*
+**/secret.yaml
+**/*secret*.yaml
+
+# =========================
+# Logs & Runtime
+# =========================
+*.log
+logs/
+*.out
+
+# =========================
+# Build / Docker
+# =========================
+dist/
+build/
+*.egg-info/
+docker-compose.override.yml
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# =========================
+# Test / Coverage
+# =========================
+.coverage
+htmlcov/
+.pytest_cache/
+
+# =========================
+# Node (혹시 대비)
+# =========================
+node_modules/

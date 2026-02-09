@@ -12,9 +12,10 @@ spec:
       labels:
         app: msg-service
     spec:
+      serviceAccountName: msg-service-sa
       containers:
         - name: msg-service
-          image: msg-service:latest
+          image: 028317349537.dkr.ecr.ap-northeast-2.amazonaws.com/msg-service:0.1
           ports:
             - containerPort: 8080
           envFrom:
