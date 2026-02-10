@@ -2,34 +2,33 @@ from dataclasses import dataclass
 
 @dataclass
 class OutboxEvent:
+    event_id: str
     event_type: str
-    from_user_id: str
-    to_user_id: str
-    ref_id: str
-    created_at: str
     status: str
-    retries: int
+    attempt_count: int
+    next_retry_at: str
+    created_at: str
+    payload: dict
     last_error: str | None = None
 
     def to_item(self):
         return {
-            "pk": f"OUTBOX#{self.to_user_id}",
-            "sk": f"{self.created_at}#{self.ref_id}",
+            "pk": f"EVENT#{self.event_id}",
+            "sk": "EVENT",
+            "event_id": self.event_id,
             "event_type": self.event_type,
-            "from_user_id": self.from_user_id,
-            "to_user_id": self.to_user_id,
-            "ref_id": self.ref_id,
-            "created_at": self.created_at,
             "status": self.status,
-            "retries": self.retries,
+            "attempt_count": self.attempt_count,
+            "next_retry_at": self.next_retry_at,
+            "created_at": self.created_at,
+            "payload": self.payload,
             "last_error": self.last_error,
         }
 
     def to_job(self):
         return {
+            "event_id": self.event_id,
             "event_type": self.event_type,
-            "from_user_id": self.from_user_id,
-            "to_user_id": self.to_user_id,
-            "ref_id": self.ref_id,
             "created_at": self.created_at,
+            "payload": self.payload,
         }
