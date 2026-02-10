@@ -11,6 +11,7 @@ class OutboxEvent:
     payload: dict
     last_error: str | None = None
 
+    # Outbox 테이블에 저장할 DynamoDB 아이템 형태로 변환.
     def to_item(self):
         return {
             "pk": f"EVENT#{self.event_id}",
@@ -25,6 +26,7 @@ class OutboxEvent:
             "last_error": self.last_error,
         }
 
+    # SQS/워커 입력에 쓰기 좋은 최소 payload 형태로 변환.
     def to_job(self):
         return {
             "event_id": self.event_id,

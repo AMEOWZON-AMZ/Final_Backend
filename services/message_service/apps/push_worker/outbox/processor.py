@@ -10,6 +10,7 @@ MAX_BACKOFF_SECONDS = 300
 
 
 def process_outbox():
+    # Outbox 이벤트를 조회해 처리.
     events = fetch_ready_events(limit=10)
     for event in events:
         if not claim_event(event):
@@ -18,6 +19,7 @@ def process_outbox():
 
 
 def handle_event(event: dict, already_claimed: bool = False):
+    # 단일 이벤트 처리(FCM 전송 후 상태 전이).
     event_id = _extract_event_id(event)
     if not event_id:
         return
@@ -52,6 +54,7 @@ def handle_event(event: dict, already_claimed: bool = False):
 
 
 def _mark_retry(repo: OutboxRepository, event_id: str, item: dict, error: str | None):
+    # 실패 시 RETRY 상태로 전환하고 재시도 시각 설정.
     attempt_count = int(item.get("attempt_count", 0)) + 1
     backoff_seconds = _compute_backoff_seconds(attempt_count)
     next_retry_at = utc_iso_after_seconds(backoff_seconds)
@@ -64,8 +67,10 @@ def _mark_retry(repo: OutboxRepository, event_id: str, item: dict, error: str | 
 
 
 def _compute_backoff_seconds(attempt_count: int) -> int:
+    # 시도 횟수 기반 지수 백오프 계산.
     return min(BASE_BACKOFF_SECONDS * (2 ** (attempt_count - 1)), MAX_BACKOFF_SECONDS)
 
 
 def _extract_event_id(event: dict) -> str | None:
+    # 이벤트 dict에서 event_id 추출.
     return event.get("event_id") or event.get("message_id") or event.get("ref_id")

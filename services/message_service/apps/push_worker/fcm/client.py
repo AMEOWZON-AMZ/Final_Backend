@@ -15,6 +15,7 @@ except Exception:
 
 
 def _get_access_token():
+    # 서비스 계정 JSON으로 FCM v1 액세스 토큰 발급.
     if service_account is None or GoogleRequest is None:
         return None, "google-auth not installed"
 
@@ -34,6 +35,7 @@ def _get_access_token():
 
 
 def send_fcm(token: str, payload: dict):
+    # FCM notification payload 전송.
     if requests is None:
         return False, "requests not installed"
 
