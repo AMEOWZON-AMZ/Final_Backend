@@ -3,22 +3,19 @@ from botocore.exceptions import ClientError
 from services.message_service.shared.ddb import ddb_table
 from services.message_service.shared.time import now_utc_iso
 
+
 class OutboxRepository:
     def __init__(self):
-        # Outbox 테이블 핸들 초기화.
         self.table = ddb_table("DDB_OUTBOX_TABLE")
 
     def put_event(self, event):
-        # Outbox 이벤트 저장.
         self.table.put_item(Item=event.to_item())
 
     def get_event(self, event_id: str):
-        # event_id로 Outbox 이벤트 조회.
         resp = self.table.get_item(Key={"pk": f"EVENT#{event_id}", "sk": "EVENT"})
         return resp.get("Item")
 
     def query_ready(self, limit=10, now_iso=None):
-        # 처리 가능한(PENDING/RETRY) 이벤트 조회.
         now_iso = now_iso or now_utc_iso()
         items = []
         items.extend(self._query_status("PENDING", limit, now_iso))
@@ -27,7 +24,6 @@ class OutboxRepository:
         return items
 
     def _query_status(self, status, limit, now_iso):
-        # 상태별 이벤트 조회(재시도 시각 필터 포함).
         resp = self.table.query(
             IndexName="status-index",
             KeyConditionExpression=Key("status").eq(status),
@@ -37,7 +33,6 @@ class OutboxRepository:
         return resp.get("Items", [])
 
     def try_mark_processing(self, event_id: str, now_iso: str) -> bool:
-        # 이벤트를 PROCESSING으로 선점(조건부 업데이트).
         try:
             self.table.update_item(
                 Key={"pk": f"EVENT#{event_id}", "sk": "EVENT"},
@@ -58,7 +53,6 @@ class OutboxRepository:
             raise
 
     def mark_sent(self, event_id: str, now_iso: str) -> bool:
-        # PROCESSING -> SENT 전이.
         try:
             self.table.update_item(
                 Key={"pk": f"EVENT#{event_id}", "sk": "EVENT"},
@@ -78,13 +72,39 @@ class OutboxRepository:
             raise
 
     def mark_retry(self, event_id: str, attempt_count: int, next_retry_at: str, last_error: str | None):
-        # PROCESSING -> RETRY 전이 및 재시도 정보 업데이트.
         now_iso = now_utc_iso()
         update = "SET #s = :retry, attempt_count = :a, next_retry_at = :n, updated_at = :u"
         values = {
             ":retry": "RETRY",
             ":a": attempt_count,
             ":n": next_retry_at,
+            ":u": now_iso,
+            ":processing": "PROCESSING",
+        }
+        if last_error:
+            update += ", last_error = :e"
+            values[":e"] = last_error
+
+        try:
+            self.table.update_item(
+                Key={"pk": f"EVENT#{event_id}", "sk": "EVENT"},
+                UpdateExpression=update,
+                ConditionExpression="#s = :processing",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues=values,
+            )
+            return True
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+
+    def mark_failed(self, event_id: str, attempt_count: int, last_error: str | None):
+        now_iso = now_utc_iso()
+        update = "SET #s = :failed, attempt_count = :a, updated_at = :u"
+        values = {
+            ":failed": "FAILED",
+            ":a": attempt_count,
             ":u": now_iso,
             ":processing": "PROCESSING",
         }

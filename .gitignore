@@ -67,3 +67,4 @@ htmlcov/
 # Node (혹시 대비)
 # =========================
 node_modules/
+serviceAccountKey.json 

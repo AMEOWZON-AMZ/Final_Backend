@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: push-worker
+  template:
+    metadata:
+      labels:
+        app: push-worker
+    spec:
+      serviceAccountName: msg-service-sa
+      containers:
+        - name: push-worker
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/push-worker:0.6
+          envFrom:
+            - secretRef:
+                name: msg-secret
+            - configMapRef:
+                name: msg-config

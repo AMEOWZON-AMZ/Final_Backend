@@ -8,6 +8,7 @@ router = APIRouter()
 class HeartCreate(BaseModel):
     from_user_id: str
     to_user_id: str
+    nickname: str
 
 @router.post("/hearts")
 async def post_heart(payload: HeartCreate):

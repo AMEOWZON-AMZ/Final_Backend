@@ -33,10 +33,8 @@ Rules (from CODEX_RULES.md):
 - Messages: `pk=RECEIVER#<to_user_id>`, `sk=<created_at>#<message_id>`
 - Hearts: `pk=RECEIVER#<to_user_id>`, `sk=<created_at>#<heart_id>`
 - DeviceTokens: `pk=USER#<user_id>`, `sk=TOKEN`
-- Friends: `pk=USER#<user_id>`, `sk=FRIEND#<friend_id>`, `status=ACCEPTED`
 - OutboxEvents: `pk=OUTBOX#<to_user_id>`, `sk=<created_at>#<ref_id>`, `status=PENDING|SENT|FAILED`
   - GSI `status-index` with partition key `status`
-- AuditEvents: `pk=AUDIT#<to_user_id>`, `sk=<created_at>#<ref_id>`, `expires_at` (TTL)
 
 ## Dependencies
 - `boto3` for DynamoDB/SQS

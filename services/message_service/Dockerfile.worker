@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
+
+COPY services/message_service /app/services/message_service
+
+ENV PYTHONPATH=/app
+
+RUN pip install --no-cache-dir -r /app/services/message_service/requirements.txt
+
+CMD ["python", "-m", "services.message_service.apps.push_worker.main"]

@@ -5,7 +5,8 @@ from services.message_service.apps.msg_service.repositories.audit_repo import Au
 from services.message_service.shared.id import new_id
 from services.message_service.shared.time import now_utc_iso
 from services.message_service.shared.models import OutboxEvent
-from services.message_service.shared.sqs import send_sqs_job
+from services.message_service.shared.push_templates import random_heart_push_text
+
 
 class HeartService:
     def __init__(self):
@@ -15,8 +16,8 @@ class HeartService:
         self.audit = AuditRepository()
 
     async def create_heart(self, payload):
-        if not self.friends.is_accepted(payload.from_user_id, payload.to_user_id):
-            raise ValueError("Not friends")
+        # if not self.friends.is_accepted(payload.from_user_id, payload.to_user_id):
+        #     raise ValueError("Not friends")
 
         heart_id = new_id()
         created_at = now_utc_iso()
@@ -27,18 +28,28 @@ class HeartService:
             to_user_id=payload.to_user_id,
             created_at=created_at,
         )
+        title, body = random_heart_push_text()
+
+        body = body.format(
+            nickname=payload.nickname
+        )
 
         event = OutboxEvent(
-            event_type="HEART",
-            from_user_id=payload.from_user_id,
-            to_user_id=payload.to_user_id,
-            ref_id=heart_id,
-            created_at=created_at,
+            event_id=heart_id,
+            event_type="PUSH_SEND",
             status="PENDING",
-            retries=0,
+            attempt_count=0,
+            next_retry_at=created_at,
+            created_at=created_at,
+            payload={
+                "title": title,
+                "body": body,
+                "heart_id": heart_id,
+                "from_user_id": payload.from_user_id,
+                "to_user_id": payload.to_user_id,
+            },
         )
         self.outbox.put_event(event)
-        send_sqs_job(event)
 
         self.audit.put_event(
             event_type="HEART",
