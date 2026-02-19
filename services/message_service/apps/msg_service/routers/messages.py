@@ -9,6 +9,7 @@ class MessageCreate(BaseModel):
     from_user_id: str
     to_user_id: str
     body: str = Field(..., min_length=1, max_length=4000)
+    nickname: str
 
 @router.post("/messages")
 async def post_message(payload: MessageCreate):
