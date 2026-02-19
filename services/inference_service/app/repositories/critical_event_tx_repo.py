@@ -22,6 +22,7 @@ class CriticalEventTransactionRepository:
         created_at: str,
         ttl: int,
         outbox_event_id: str,
+        outbox_dedupe_key: str,
         outbox_payload: dict,
     ) -> bool:
         critical_contacts_item = {
@@ -37,7 +38,7 @@ class CriticalEventTransactionRepository:
             "sk": "EVENT",
             "event_id": outbox_event_id,
             "event_type": "CRITICAL_ALERT",
-            "dedupe_key": outbox_event_id,
+            "dedupe_key": outbox_dedupe_key,
             "status": "PENDING",
             "attempt_count": 0,
             "next_retry_at": created_at,
@@ -57,7 +58,7 @@ class CriticalEventTransactionRepository:
                                 "SET is_critical = :true, "
                                 "critical_since = :critical_since, "
                                 "updated_at = :updated_at, "
-                                "current_daily_status = if_not_exists(current_daily_status, :no_data)"
+                                "current_daily_status = :critical_status"
                             ),
                             "ConditionExpression": "attribute_not_exists(is_critical) OR is_critical = :false",
                             "ExpressionAttributeValues": serialize_item(
@@ -66,7 +67,7 @@ class CriticalEventTransactionRepository:
                                     ":false": False,
                                     ":critical_since": created_at,
                                     ":updated_at": created_at,
-                                    ":no_data": "NO_DATA",
+                                    ":critical_status": "CRITICAL",
                                 }
                             ),
                         }

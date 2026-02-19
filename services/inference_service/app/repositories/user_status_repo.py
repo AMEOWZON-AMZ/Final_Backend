@@ -19,7 +19,27 @@ class UserStatusRepository:
         daily_status: str,
         updated_at: str,
         last_inference_at: str,
+        clear_critical: bool = False,
     ) -> None:
+        if clear_critical:
+            self.table.update_item(
+                Key={"user_id": user_id},
+                UpdateExpression=(
+                    "SET current_daily_status = :daily_status, "
+                    "updated_at = :updated_at, "
+                    "last_inference_at = :last_inference_at, "
+                    "is_critical = :is_critical_false "
+                    "REMOVE critical_since"
+                ),
+                ExpressionAttributeValues={
+                    ":daily_status": daily_status,
+                    ":updated_at": updated_at,
+                    ":last_inference_at": last_inference_at,
+                    ":is_critical_false": False,
+                },
+            )
+            return
+
         self.table.update_item(
             Key={"user_id": user_id},
             UpdateExpression=(

@@ -35,6 +35,7 @@ class InferenceEventService:
             daily_status=payload.daily_status,
             updated_at=now_iso,
             last_inference_at=inference_at,
+            clear_critical=is_critical,
         )
 
         fanout_updated = 0
@@ -72,6 +73,7 @@ class InferenceEventService:
 
         friends = [friend.model_dump() for friend in payload.friends]
         ttl = epoch_seconds_plus_days(settings.critical_contacts_ttl_days)
+        outbox_event_id = payload.event_id
         dedupe_key = f"CRITICAL#{payload.critical_user_id}"
         to_user_ids = [friend.friend_user_id for friend in payload.friends]
         outbox_payload = {
@@ -91,16 +93,39 @@ class InferenceEventService:
             friends=friends,
             created_at=now_iso,
             ttl=ttl,
-            outbox_event_id=dedupe_key,
+            outbox_event_id=outbox_event_id,
+            outbox_dedupe_key=dedupe_key,
             outbox_payload=outbox_payload,
         )
         if not changed:
             return {"action": "SKIPPED", "reason": "already_critical"}
 
+        fanout_updated = 0
+        last_key = None
+        while True:
+            resp = self.user_friends_repo.query_by_friend_user_id(
+                friend_user_id=payload.critical_user_id,
+                limit=100,
+                last_key=last_key,
+            )
+            for item in resp.get("Items", []):
+                self.user_friends_repo.update_daily_status(
+                    user_id=item["user_id"],
+                    friend_user_id=item["friend_user_id"],
+                    daily_status="CRITICAL",
+                    updated_at=now_iso,
+                )
+                fanout_updated += 1
+
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break
+
         return {
             "action": "UPDATED",
             "critical_user_id": payload.critical_user_id,
-            "outbox_event_id": dedupe_key,
+            "outbox_event_id": outbox_event_id,
             "friends_count": len(to_user_ids),
+            "fanout_updated": fanout_updated,
             "updated_at": now_iso,
         }

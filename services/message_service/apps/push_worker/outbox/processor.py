@@ -39,24 +39,38 @@ def handle_event(event: dict, already_claimed: bool = False):
 
     payload = item.get("payload") or {}
     attempt_count = int(item.get("attempt_count", 0))
-
-    to_user_id = payload.get("to_user_id")
-    token = None
-    if to_user_id:
-        token_repo = DeviceTokenRepository()
-        token_item = token_repo.get_token(to_user_id)
-        if token_item:
-            token = token_item.get("token")
-
-    if not token:
-        _mark_retry_or_failed(repo, event_id, attempt_count, "missing device token")
+    target_user_ids = _extract_target_user_ids(payload)
+    if not target_user_ids:
+        _mark_retry_or_failed(repo, event_id, attempt_count, "missing target user id(s)")
         return
 
-    ok, error = send_fcm(token, payload)
-    if ok:
-        repo.mark_sent(event_id=event_id, now_iso=now_utc_iso())
-    else:
-        _mark_retry_or_failed(repo, event_id, attempt_count, error)
+    token_repo = DeviceTokenRepository()
+    errors = []
+    sent_count = 0
+
+    for user_id in target_user_ids:
+        token_item = token_repo.get_token(user_id)
+        token = token_item.get("token") if token_item else None
+        if not token:
+            errors.append(f"missing token:{user_id}")
+            continue
+
+        ok, error = send_fcm(token, payload)
+        if ok:
+            sent_count += 1
+        else:
+            errors.append(f"send failed:{user_id}:{error}")
+
+    if errors:
+        summary = "; ".join(errors[:5])
+        _mark_retry_or_failed(repo, event_id, attempt_count, summary)
+        return
+
+    if sent_count == 0:
+        _mark_retry_or_failed(repo, event_id, attempt_count, "no recipients sent")
+        return
+
+    repo.mark_sent(event_id=event_id, now_iso=now_utc_iso())
 
 
 def _mark_retry_or_failed(repo: OutboxRepository, event_id: str, attempt_count: int, error: str | None):
@@ -81,3 +95,25 @@ def _compute_backoff_seconds(attempt_count: int) -> int:
 
 def _extract_event_id(event: dict) -> str | None:
     return event.get("event_id") or event.get("message_id") or event.get("ref_id")
+
+
+def _extract_target_user_ids(payload: dict) -> list[str]:
+    multi = payload.get("to_user_ids")
+    if isinstance(multi, list):
+        deduped = []
+        seen = set()
+        for value in multi:
+            if not isinstance(value, str):
+                continue
+            user_id = value.strip()
+            if not user_id or user_id in seen:
+                continue
+            seen.add(user_id)
+            deduped.append(user_id)
+        if deduped:
+            return deduped
+
+    single = payload.get("to_user_id")
+    if isinstance(single, str) and single.strip():
+        return [single.strip()]
+    return []
