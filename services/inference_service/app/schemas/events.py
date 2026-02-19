@@ -7,7 +7,6 @@ DailyStatus = Literal["HAPPY", "SOSO", "SAD", "FAINT", "NO_DATA"]
 
 
 class DailyStatusEventRequest(BaseModel):
-    event_id: str | None = None
     user_id: str = Field(..., min_length=1)
     daily_status: DailyStatus
     inference_at: str | None = None

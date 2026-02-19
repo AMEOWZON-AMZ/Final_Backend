@@ -5,12 +5,14 @@ from services.inference_service.app.shared.ddb import ddb_client, serialize_item
 
 
 class CriticalEventTransactionRepository:
+    # critical 처리에 필요한 테이블 이름과 DynamoDB client를 초기화한다.
     def __init__(self):
         self.client = ddb_client()
         self.user_status_table = settings.required("DDB_USER_STATUS_TABLE")
         self.critical_contacts_table = settings.required("DDB_CRITICAL_CONTACTS_TABLE")
         self.outbox_table = settings.required("DDB_OUTBOX_TABLE")
 
+    # critical 상태 반영 + snapshot 저장 + outbox 적재를 트랜잭션으로 1회 처리한다.
     def apply_once(
         self,
         critical_user_id: str,

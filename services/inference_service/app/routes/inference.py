@@ -6,6 +6,7 @@ from services.inference_service.app.services.inference_event_service import Infe
 router = APIRouter()
 
 
+# SageMaker 일일 상태 이벤트를 받아 상태 저장/전파 로직을 실행한다.
 @router.post("/events/daily-status")
 async def post_daily_status(payload: DailyStatusEventRequest):
     service = InferenceEventService()
@@ -16,6 +17,7 @@ async def post_daily_status(payload: DailyStatusEventRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# 36시간 비활동 critical 이벤트를 받아 트랜잭션 처리 및 outbox 적재를 수행한다.
 @router.post("/events/critical")
 async def post_critical_event(payload: CriticalEventRequest):
     service = InferenceEventService()

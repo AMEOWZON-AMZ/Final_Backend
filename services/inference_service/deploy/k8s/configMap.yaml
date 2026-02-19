@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inference-config
+data:
+  AWS_REGION: "ap-northeast-2"
+
+  DDB_USER_STATUS_TABLE: "user_status"
+  DDB_FRIENDS_TABLE: "user_friends"
+  DDB_CRITICAL_CONTACTS_TABLE: "critical_contacts"
+  DDB_OUTBOX_TABLE: "OutboxEvents"
+  DDB_USER_FRIENDS_GSI: "GSI1"
+
+  CRITICAL_CONTACTS_TTL_DAYS: "7"
