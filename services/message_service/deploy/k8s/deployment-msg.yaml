@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: msg-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: msg-service
+  template:
+    metadata:
+      labels:
+        app: msg-service
+    spec:
+      serviceAccountName: msg-service-sa
+      containers:
+        - name: msg-service
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/msg-service:0.8
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: msg-secret
+            - configMapRef:
+                name: msg-config

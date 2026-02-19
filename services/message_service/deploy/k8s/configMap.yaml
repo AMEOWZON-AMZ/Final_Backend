@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: msg-config
+data:
+  AWS_REGION: "ap-northeast-2"
+  OUTBOX_TEST_MODE: "1"
+
+  DDB_MESSAGES_TABLE: "Messages"
+  DDB_HEARTS_TABLE: "Hearts"
+  DDB_OUTBOX_TABLE: "OutboxEvents"
+  DDB_DEVICE_TOKENS_TABLE: "DeviceTokens"
+  DDB_FRIENDS_TABLE: "Friends"
+  DDB_AUDIT_TABLE: "AuditEvents"
+
+  SQS_QUEUE_URL: ""
+
+  APP_ENV: "development"
+  LOG_LEVEL: "INFO"
+  AUDIT_TTL_DAYS: "7"
