@@ -34,6 +34,56 @@ def _get_access_token():
     return creds.token, None
 
 
+def _build_critical_push_data(payload: dict) -> dict[str, str] | None:
+    raw = payload.get("data")
+    parsed = _parse_data_payload(raw)
+    if not parsed or parsed.get("event_type") != "CRITICAL_PUSH":
+        return None
+
+    inner = parsed.get("payload")
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except Exception:
+            return None
+
+    if not isinstance(inner, dict):
+        inner = parsed
+
+    phone_number = inner.get("phone_number")
+    if not isinstance(phone_number, str) or not phone_number.strip():
+        return None
+
+    fcm_data = {
+        "event_type": "CRITICAL_PUSH",
+        "phone_number": phone_number.strip(),
+    }
+
+    from_user_id = inner.get("from_user_id")
+    if isinstance(from_user_id, str) and from_user_id.strip():
+        fcm_data["from_user_id"] = from_user_id.strip()
+
+    to_user_id = inner.get("to_user_id")
+    if isinstance(to_user_id, str) and to_user_id.strip():
+        fcm_data["to_user_id"] = to_user_id.strip()
+
+    return fcm_data
+
+
+def _parse_data_payload(raw) -> dict | None:
+    if isinstance(raw, dict):
+        return raw
+
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    return None
+
+
 def send_fcm(token: str, payload: dict):
     # FCM notification payload 전송.
     if requests is None:
@@ -59,6 +109,9 @@ def send_fcm(token: str, payload: dict):
             "notification": notification,
         }
     }
+    critical_data = _build_critical_push_data(payload)
+    if critical_data:
+        body["message"]["data"] = critical_data
 
     headers = {
         "Authorization": f"Bearer {access_token}",
