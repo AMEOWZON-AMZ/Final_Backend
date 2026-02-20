@@ -10,7 +10,8 @@ class CriticalEventTransactionRepository:
         self.client = ddb_client()
         self.user_status_table = settings.required("DDB_USER_STATUS_TABLE")
         self.critical_contacts_table = settings.required("DDB_CRITICAL_CONTACTS_TABLE")
-        self.outbox_table = settings.required("DDB_OUTBOX_TABLE")
+        # 알림 outbox 적재는 비활성화.
+        # self.outbox_table = settings.required("DDB_OUTBOX_TABLE")
 
     # critical 상태 반영 + snapshot 저장 + outbox 적재를 트랜잭션으로 1회 처리한다.
     def apply_once(
@@ -21,9 +22,6 @@ class CriticalEventTransactionRepository:
         friends: list[dict],
         created_at: str,
         ttl: int,
-        outbox_event_id: str,
-        outbox_dedupe_key: str,
-        outbox_payload: dict,
     ) -> bool:
         critical_contacts_item = {
             "critical_user_id": critical_user_id,
@@ -33,19 +31,19 @@ class CriticalEventTransactionRepository:
             "created_at": created_at,
             "ttl": ttl,
         }
-        outbox_item = {
-            "pk": f"EVENT#{outbox_event_id}",
-            "sk": "EVENT",
-            "event_id": outbox_event_id,
-            "event_type": "CRITICAL_ALERT",
-            "dedupe_key": outbox_dedupe_key,
-            "status": "PENDING",
-            "attempt_count": 0,
-            "next_retry_at": created_at,
-            "created_at": created_at,
-            "payload": outbox_payload,
-            "last_error": None,
-        }
+        # outbox_item = {
+        #     "pk": f"EVENT#{outbox_event_id}",
+        #     "sk": "EVENT",
+        #     "event_id": outbox_event_id,
+        #     "event_type": "CRITICAL_ALERT",
+        #     "dedupe_key": outbox_dedupe_key,
+        #     "status": "PENDING",
+        #     "attempt_count": 0,
+        #     "next_retry_at": created_at,
+        #     "created_at": created_at,
+        #     "payload": outbox_payload,
+        #     "last_error": None,
+        # }
 
         try:
             self.client.transact_write_items(
@@ -79,13 +77,13 @@ class CriticalEventTransactionRepository:
                             "ConditionExpression": "attribute_not_exists(critical_user_id) AND attribute_not_exists(event_id)",
                         }
                     },
-                    {
-                        "Put": {
-                            "TableName": self.outbox_table,
-                            "Item": serialize_item(outbox_item),
-                            "ConditionExpression": "attribute_not_exists(pk) AND attribute_not_exists(sk)",
-                        }
-                    },
+                    # {
+                    #     "Put": {
+                    #         "TableName": self.outbox_table,
+                    #         "Item": serialize_item(outbox_item),
+                    #         "ConditionExpression": "attribute_not_exists(pk) AND attribute_not_exists(sk)",
+                    #     }
+                    # },
                 ]
             )
             return True

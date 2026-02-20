@@ -3,6 +3,7 @@ from services.inference_service.app.repositories.critical_event_tx_repo import C
 from services.inference_service.app.repositories.user_friends_repo import UserFriendsRepository
 from services.inference_service.app.repositories.user_status_repo import UserStatusRepository
 from services.inference_service.app.schemas.events import CriticalEventRequest, DailyStatusEventRequest
+from services.inference_service.app.shared.sqs import send_critical_agent_event
 from services.inference_service.app.shared.time import epoch_seconds_plus_days, now_utc_iso, to_utc_iso
 
 
@@ -73,18 +74,18 @@ class InferenceEventService:
 
         friends = [friend.model_dump() for friend in payload.friends]
         ttl = epoch_seconds_plus_days(settings.critical_contacts_ttl_days)
-        outbox_event_id = payload.event_id
-        dedupe_key = f"CRITICAL#{payload.critical_user_id}"
-        to_user_ids = [friend.friend_user_id for friend in payload.friends]
-        outbox_payload = {
-            "to_user_ids": to_user_ids,
-            "title": "Critical status detected",
-            "body": f"User {payload.critical_user_id} may be in danger. Please check now.",
-            "critical_user_id": payload.critical_user_id,
-            "critical_gps": payload.critical_gps,
-            "friends": friends,
-            "occurred_at": occurred_at,
-        }
+        # outbox_event_id = payload.event_id
+        # dedupe_key = f"CRITICAL#{payload.critical_user_id}"
+        # to_user_ids = [friend.friend_user_id for friend in payload.friends]
+        # outbox_payload = {
+        #     "to_user_ids": to_user_ids,
+        #     "title": "Critical status detected",
+        #     "body": f"User {payload.critical_user_id} may be in danger. Please check now.",
+        #     "critical_user_id": payload.critical_user_id,
+        #     "critical_gps": payload.critical_gps,
+        #     "friends": friends,
+        #     "occurred_at": occurred_at,
+        # }
 
         changed = self.critical_tx_repo.apply_once(
             critical_user_id=payload.critical_user_id,
@@ -93,12 +94,15 @@ class InferenceEventService:
             friends=friends,
             created_at=now_iso,
             ttl=ttl,
-            outbox_event_id=outbox_event_id,
-            outbox_dedupe_key=dedupe_key,
-            outbox_payload=outbox_payload,
         )
         if not changed:
             return {"action": "SKIPPED", "reason": "already_critical"}
+
+        send_critical_agent_event(
+            event_id=payload.event_id,
+            user_id=payload.critical_user_id,
+            occurred_at=occurred_at,
+        )
 
         fanout_updated = 0
         last_key = None
@@ -124,8 +128,8 @@ class InferenceEventService:
         return {
             "action": "UPDATED",
             "critical_user_id": payload.critical_user_id,
-            "outbox_event_id": outbox_event_id,
-            "friends_count": len(to_user_ids),
+            "critical_agent_enqueued": True,
             "fanout_updated": fanout_updated,
+            "occurred_at": occurred_at,
             "updated_at": now_iso,
         }
