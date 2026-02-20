@@ -38,8 +38,9 @@ def handle_event(event: dict, already_claimed: bool = False):
         return
 
     payload = item.get("payload") or {}
+    event_type = item.get("event_type")
     attempt_count = int(item.get("attempt_count", 0))
-    target_user_ids = _extract_target_user_ids(payload)
+    target_user_ids = _extract_target_user_ids(payload, event_type=event_type)
     if not target_user_ids:
         _mark_retry_or_failed(repo, event_id, attempt_count, "missing target user id(s)")
         return
@@ -55,7 +56,7 @@ def handle_event(event: dict, already_claimed: bool = False):
             errors.append(f"missing token:{user_id}")
             continue
 
-        ok, error = send_fcm(token, payload)
+        ok, error = send_fcm(token, payload, event_type=event_type)
         if ok:
             sent_count += 1
         else:
@@ -97,7 +98,7 @@ def _extract_event_id(event: dict) -> str | None:
     return event.get("event_id") or event.get("message_id") or event.get("ref_id")
 
 
-def _extract_target_user_ids(payload: dict) -> list[str]:
+def _extract_target_user_ids(payload: dict, event_type: str | None = None) -> list[str]:
     multi = payload.get("to_user_ids")
     if isinstance(multi, list):
         deduped = []
@@ -116,4 +117,26 @@ def _extract_target_user_ids(payload: dict) -> list[str]:
     single = payload.get("to_user_id")
     if isinstance(single, str) and single.strip():
         return [single.strip()]
+
+    if event_type == "CRITICAL_ALERT":
+        data = payload.get("data")
+        if isinstance(data, dict):
+            multi = data.get("to_user_ids")
+            if isinstance(multi, list):
+                deduped = []
+                seen = set()
+                for value in multi:
+                    if not isinstance(value, str):
+                        continue
+                    user_id = value.strip()
+                    if not user_id or user_id in seen:
+                        continue
+                    seen.add(user_id)
+                    deduped.append(user_id)
+                if deduped:
+                    return deduped
+
+            single = data.get("to_user_id")
+            if isinstance(single, str) and single.strip():
+                return [single.strip()]
     return []

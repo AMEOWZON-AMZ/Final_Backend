@@ -34,10 +34,13 @@ def _get_access_token():
     return creds.token, None
 
 
-def _build_critical_push_data(payload: dict) -> dict[str, str] | None:
+def _build_critical_push_data(payload: dict, event_type: str | None) -> dict[str, str] | None:
+    if event_type != "CRITICAL_ALERT":
+        return None
+
     raw = payload.get("data")
     parsed = _parse_data_payload(raw)
-    if not parsed or parsed.get("event_type") != "CRITICAL_PUSH":
+    if not parsed:
         return None
 
     inner = parsed.get("payload")
@@ -84,7 +87,7 @@ def _parse_data_payload(raw) -> dict | None:
     return None
 
 
-def send_fcm(token: str, payload: dict):
+def send_fcm(token: str, payload: dict, event_type: str | None = None):
     # FCM notification payload 전송.
     if requests is None:
         return False, "requests not installed"
@@ -98,20 +101,35 @@ def send_fcm(token: str, payload: dict):
         return False, err
 
     url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-    notification = {
-        "title": payload.get("title") or "New notification",
-        "body": payload.get("body") or "You have a new message",
+    critical_data = _build_critical_push_data(payload, event_type=event_type)
+    message = {
+        "token": token,
     }
-
-    body = {
-        "message": {
-            "token": token,
-            "notification": notification,
-        }
-    }
-    critical_data = _build_critical_push_data(payload)
     if critical_data:
-        body["message"]["data"] = critical_data
+        # CRITICAL_PUSH는 앱 커스텀 동작(전화/딥링크)을 위해 data-only로 전송.
+        message["data"] = critical_data
+        print(
+            "[FCM] mode=data-only",
+            f"db_event_type={event_type}",
+            f"event_type={critical_data.get('event_type')}",
+            f"to_user_id={critical_data.get('to_user_id')}",
+        )
+    else:
+        notification = {
+            "title": payload.get("title") or "New notification",
+            "body": payload.get("body") or "You have a new message",
+        }
+        message["notification"] = notification
+        raw_data = payload.get("data")
+        raw_event_type = raw_data.get("event_type") if isinstance(raw_data, dict) else None
+        print(
+            "[FCM] mode=notification",
+            f"db_event_type={event_type}",
+            f"data_present={raw_data is not None}",
+            f"data_event_type={raw_event_type}",
+        )
+
+    body = {"message": message}
 
     headers = {
         "Authorization": f"Bearer {access_token}",
