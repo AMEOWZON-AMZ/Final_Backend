@@ -1,1 +1,729 @@
-# Users routes - 기존 users.py 내용 유지
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Form
+from sqlalchemy.orm import Session
+from typing import Optional
+import json
+from loguru import logger
+from pydantic import EmailStr
+
+from app.core.database import get_db
+from app.schemas.user import (
+    UserCreate, UserResponse, UserUpdate, UserProfile, TokenInfo, 
+    LoginResponse, ProfileSetupData, UserSignup, LoginRequest
+)
+from app.schemas.response import success_response, error_response
+from app.services.user_service import UserService
+from app.services.s3_service import s3_service
+from app.models.user import User
+
+router = APIRouter()
+
+
+@router.post("/login", response_model=dict)
+async def login_and_get_lobby(
+    request: Request,
+    login_data: LoginRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    로그인 시 프로필 동기화 + 온라인 상태 설정 + 로비 친구 정보 반환
+
+    Request Body:
+    - user_id: 사용자 ID (필수)
+    - token: FCM 토큰 (Firebase Cloud Messaging) - 푸시 알림용 (선택)
+
+    FCM 토큰 사용 시나리오:
+    1. 클라이언트에서 FirebaseMessagingService.onNewToken() 호출
+    2. 받은 토큰을 로그인 API에 함께 전송
+    3. 서버에서 자동으로 토큰 저장/업데이트
+    4. 이후 푸시 알림 전송 가능
+    """
+    # 요청 로깅
+    logger.info(f"🔥 LOGIN REQUEST: {request.method} {request.url}")
+    logger.info(f"👤 User ID: {login_data.user_id}")
+
+    # FCM 토큰 로깅
+    if login_data.token:
+        logger.info(f"📱 FCM Token received (first 20 chars): {login_data.token[:20]}...")
+
+    try:
+        user_service = UserService(db)
+
+        # 1. 사용자 조회
+        user = await user_service.get_user_by_id(login_data.user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+            )
+
+        # 2. FCM 토큰 업데이트 (제공된 경우)
+        if login_data.token:
+            await user_service.update_fcm_token(user.user_id, login_data.token)
+            logger.info(f"✅ FCM Token updated for user: {user.user_id}")
+
+        # 3. 로비용 친구 목록 조회
+        lobby_friends = await user_service.get_lobby_friends(user.user_id)
+
+        # 4. 사용자 프로필 정보
+        user_profile = UserProfile(
+            user_id=user.user_id,
+            email=user.email,
+            nickname=user.nickname,
+            phone_number=user.phone_number,
+            provider=user.provider,
+            profile_image_url=user.profile_image_url,
+            friend_code=user.friend_code,
+            cat_pattern=user.cat_pattern,
+            cat_color=user.cat_color,
+            duress_code=user.duress_code,
+            meow_audio_url=user.meow_audio_url,
+            created_at_timestamp=user.created_at_timestamp,
+            updated_at_timestamp=user.updated_at_timestamp
+        )
+
+        # 5. 통합 응답
+        login_response = LoginResponse(
+            user=user_profile,
+            friends=lobby_friends,
+            total_friends=len(lobby_friends)
+        )
+
+        response_data = success_response(
+            data=login_response,
+            message="Login successful and lobby data retrieved"
+        )
+
+        # 응답 로깅
+        logger.info(f"✅ LOGIN SUCCESS: user_id={user.user_id}, friends_count={len(lobby_friends)}")
+        logger.info(f"📤 Response: {json.dumps(response_data, indent=2, default=str)}")
+
+        return response_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_detail = error_response(message=str(e), error_code="LOGIN_ERROR")
+        logger.error(f"❌ LOGIN ERROR: {str(e)}")
+        logger.error(f"📤 Error Response: {json.dumps(error_detail, indent=2)}")
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail
+        )
+
+
+
+@router.post("/signup", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def signup(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    회원가입 (JSON 또는 Multipart 자동 감지)
+    
+    Content-Type에 따라 자동으로 처리 방식 결정:
+    - application/json: URL만 받음
+    - multipart/form-data: 파일 직접 업로드
+    """
+    content_type = request.headers.get("content-type", "")
+    logger.info(f"🔥 SIGNUP REQUEST: {request.method} {request.url}")
+    logger.info(f"� Content-Type: {content_type}")
+    
+    try:
+        user_service = UserService(db)
+        
+        if content_type.startswith("multipart/form-data"):
+            # Multipart 처리
+            logger.info("📦 Processing as MULTIPART")
+            form = await request.form()
+            
+            user_id = form.get("user_id")
+            email = form.get("email")
+            nickname = form.get("nickname")
+            phone_number = form.get("phone_number")  # 전화번호 추가
+            cat_pattern = form.get("cat_pattern")
+            cat_color = form.get("cat_color")
+            duress_code = form.get("duress_code")
+            token = form.get("token")
+            
+            profile_image = form.get("profile_image")
+            meow_audio = form.get("meow_audio")
+            duress_audio = form.get("duress_audio")
+            
+            logger.info(f"📝 User: {user_id}, {email}, {nickname}, {phone_number}")
+            logger.info(f"🎨 Cat: {cat_pattern}, {cat_color}")
+            
+            # 파일 업로드 처리
+            profile_image_url = None
+            meow_audio_url = None
+            duress_audio_url = None
+            
+            if profile_image and hasattr(profile_image, 'filename'):
+                logger.info(f"📤 Uploading profile image: {profile_image.filename}")
+                profile_image_url = await s3_service.upload_profile_image(profile_image, user_id)
+                logger.info(f"✅ Uploaded: {profile_image_url}")
+            
+            if meow_audio and hasattr(meow_audio, 'filename'):
+                logger.info(f"📤 Uploading meow audio: {meow_audio.filename}")
+                meow_audio_url = await s3_service.upload_meow_audio(meow_audio, user_id)
+                logger.info(f"✅ Uploaded: {meow_audio_url}")
+            
+            if duress_audio and hasattr(duress_audio, 'filename'):
+                logger.info(f"📤 Uploading duress audio: {duress_audio.filename}")
+                duress_audio_url = await s3_service.upload_duress_audio(duress_audio, user_id)
+                logger.info(f"✅ Uploaded: {duress_audio_url}")
+            
+            # UserSignup 스키마 생성
+            signup_data = UserSignup(
+                user_id=user_id,
+                email=email,
+                nickname=nickname,
+                phone_number=phone_number,  # 전화번호 추가
+                cat_pattern=cat_pattern,
+                cat_color=cat_color,
+                profile_image_url=profile_image_url,
+                meow_audio_url=meow_audio_url,
+                duress_audio_url=duress_audio_url,
+                duress_code=duress_code,
+                token=token
+            )
+            
+        else:
+            # JSON 처리
+            logger.info("📄 Processing as JSON")
+            body = await request.json()
+            signup_data = UserSignup(**body)
+            logger.info(f"📝 Request Body: {signup_data.model_dump()}")
+        
+        # 사용자 생성
+        user = await user_service.create_user_from_signup(signup_data)
+        
+        response_data = success_response(
+            data=UserResponse.model_validate(user),
+            message="회원가입이 완료되었습니다"
+        )
+        
+        logger.info(f"✅ SIGNUP SUCCESS: user_id={user.user_id}, email={user.email}")
+        logger.info(f"📤 Response: 사용자 생성 완료 - 친구코드: {user.friend_code}")
+        
+        return response_data
+        
+    except ValueError as e:
+        error_detail = error_response(message=str(e), error_code="SIGNUP_ERROR")
+        logger.error(f"❌ SIGNUP ERROR: {str(e)}")
+        logger.error(f"📤 Error Response: {json.dumps(error_detail, indent=2)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail
+        )
+    except Exception as e:
+        error_detail = error_response(
+            message="회원가입 처리 중 오류가 발생했습니다", 
+            error_code="INTERNAL_ERROR"
+        )
+        logger.error(f"❌ SIGNUP INTERNAL ERROR: {str(e)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_detail
+        )
+
+
+@router.post("/signup-multipart", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def signup_multipart(
+    request: Request,
+    user_id: str = Form(...),
+    email: EmailStr = Form(...),
+    nickname: str = Form(...),
+    phone_number: Optional[str] = Form(None),  # 전화번호 추가
+    cat_pattern: str = Form(...),
+    cat_color: str = Form(...),
+    profile_image: UploadFile = File(None),
+    meow_audio: UploadFile = File(None),
+    duress_audio: UploadFile = File(None),
+    duress_code: Optional[str] = Form(None),
+    token: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    회원가입 (Multipart/form-data 방식)
+    
+    파일을 직접 업로드하는 방식
+    
+    필수 필드:
+    - user_id: Google/Cognito sub 값
+    - email: 이메일 주소
+    - nickname: 닉네임
+    - cat_pattern: 고양이 패턴
+    - cat_color: 고양이 색상
+    
+    선택 필드:
+    - profile_image: 프로필 이미지 파일
+    - meow_audio: 야옹 소리 파일
+    - duress_audio: 위험 신호 소리 파일
+    - duress_code: 위험 신호 코드
+    - token: FCM 토큰 (푸시 알림용)
+    """
+    # 요청 로깅
+    logger.info(f"🔥 SIGNUP REQUEST (MULTIPART): {request.method} {request.url}")
+    logger.info(f"📝 User ID: {user_id}, Email: {email}, Nickname: {nickname}")
+    logger.info(f"🎨 Cat: pattern={cat_pattern}, color={cat_color}")
+    
+    if profile_image:
+        logger.info(f"🖼️ Profile image: {profile_image.filename}")
+    if meow_audio:
+        logger.info(f"🐱 Meow audio: {meow_audio.filename}")
+    if duress_audio:
+        logger.info(f"🚨 Duress audio: {duress_audio.filename}")
+    
+    try:
+        user_service = UserService(db)
+        
+        # 파일 업로드 처리
+        profile_image_url = None
+        meow_audio_url = None
+        duress_audio_url = None
+        
+        if profile_image:
+            logger.info(f"📤 Uploading profile image to S3...")
+            profile_image_url = await s3_service.upload_profile_image(profile_image, user_id)
+            logger.info(f"✅ Profile image uploaded: {profile_image_url}")
+        
+        if meow_audio:
+            logger.info(f"📤 Uploading meow audio to S3...")
+            meow_audio_url = await s3_service.upload_meow_audio(meow_audio, user_id)
+            logger.info(f"✅ Meow audio uploaded: {meow_audio_url}")
+        
+        if duress_audio:
+            logger.info(f"📤 Uploading duress audio to S3...")
+            duress_audio_url = await s3_service.upload_duress_audio(duress_audio, user_id)
+            logger.info(f"✅ Duress audio uploaded: {duress_audio_url}")
+        
+        # UserSignup 스키마 생성
+        signup_data = UserSignup(
+            user_id=user_id,
+            email=email,
+            nickname=nickname,
+            phone_number=phone_number,  # 전화번호 추가
+            cat_pattern=cat_pattern,
+            cat_color=cat_color,
+            profile_image_url=profile_image_url,
+            meow_audio_url=meow_audio_url,
+            duress_audio_url=duress_audio_url,
+            duress_code=duress_code,
+            token=token
+        )
+        
+        # 사용자 생성
+        user = await user_service.create_user_from_signup(signup_data)
+        
+        response_data = success_response(
+            data=UserResponse.model_validate(user),
+            message="회원가입이 완료되었습니다"
+        )
+        
+        # 응답 로깅
+        logger.info(f"✅ SIGNUP SUCCESS: user_id={user.user_id}, email={user.email}")
+        logger.info(f"📤 Response: 사용자 생성 완료 - 친구코드: {user.friend_code}")
+        
+        return response_data
+        
+    except ValueError as e:
+        error_detail = error_response(message=str(e), error_code="SIGNUP_ERROR")
+        logger.error(f"❌ SIGNUP ERROR: {str(e)}")
+        logger.error(f"📤 Error Response: {json.dumps(error_detail, indent=2)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_detail
+        )
+    except Exception as e:
+        error_detail = error_response(
+            message="회원가입 처리 중 오류가 발생했습니다", 
+            error_code="INTERNAL_ERROR"
+        )
+        logger.error(f"❌ SIGNUP INTERNAL ERROR: {str(e)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_detail
+        )
+
+
+@router.get("/check", response_model=dict, status_code=status.HTTP_200_OK)
+async def check_user_exists(
+    email: str,
+    db: Session = Depends(get_db)
+):
+    """
+    사용자 존재 여부 확인
+    
+    Google/Cognito 로그인 후 호출하여 해당 이메일의 사용자가 등록되어 있는지 확인
+    
+    Args:
+        email: 확인할 이메일 주소
+        
+    Returns:
+        - exists: 사용자 존재 여부 (true/false)
+    """
+    logger.info(f"🔍 USER CHECK REQUEST: email={email}")
+    
+    try:
+        user_service = UserService(db)
+        user = await user_service.get_user_by_email(email)
+        
+        exists = user is not None
+        
+        if exists:
+            logger.info(f"✅ User exists: user_id={user.user_id}, nickname={user.nickname}")
+        else:
+            logger.info(f"❌ User not found: email={email}")
+        
+        return success_response(
+            data={"exists": exists},
+            message="사용자 존재 여부 확인 완료"
+        )
+            
+    except Exception as e:
+        logger.error(f"❌ USER CHECK ERROR: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_response(
+                message="사용자 확인 중 오류가 발생했습니다",
+                error_code="CHECK_ERROR"
+            )
+        )
+
+
+@router.get("/profile/{user_id}", response_model=dict)
+async def get_my_profile(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    사용자 프로필 조회
+    
+    - user_id는 URL 맨 뒤에 명시
+    - 인증 없음 (보안 주의)
+    """
+    # 요청 로깅
+    logger.info(f"🔥 GET_PROFILE REQUEST: {request.method} {request.url}")
+    logger.info(f"👤 User ID: {user_id}")
+    
+    user_service = UserService(db)
+    user = await user_service.get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+        )
+    
+    profile = UserProfile(
+        user_id=user.user_id,
+        email=user.email,
+        nickname=user.nickname,
+        phone_number=user.phone_number,
+        provider=user.provider,
+        profile_image_url=user.profile_image_url,
+        friend_code=user.friend_code,
+        cat_pattern=user.cat_pattern,
+        cat_color=user.cat_color,
+        duress_code=user.duress_code,
+        meow_audio_url=user.meow_audio_url,
+        created_at_timestamp=user.created_at_timestamp,
+        updated_at_timestamp=user.updated_at_timestamp
+    )
+    
+    response_data = success_response(
+        data=profile,
+        message="Profile retrieved successfully"
+    )
+    
+    # 응답 로깅
+    logger.info(f"✅ GET_PROFILE SUCCESS: user_id={user.user_id}")
+    
+    return response_data
+
+
+@router.put("/profile/{user_id}", response_model=dict)
+async def update_my_profile(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    프로필 수정 (JSON 또는 Multipart 자동 감지)
+    
+    Content-Type에 따라 자동으로 처리 방식 결정:
+    - application/json: URL만 받음
+    - multipart/form-data: 파일 직접 업로드
+    """
+    content_type = request.headers.get("content-type", "")
+    logger.info(f"🔥 UPDATE_PROFILE REQUEST: {request.method} {request.url}")
+    logger.info(f"👤 User ID: {user_id}")
+    logger.info(f"📋 Content-Type: {content_type}")
+    
+    try:
+        user_service = UserService(db)
+        
+        if content_type.startswith("multipart/form-data"):
+            # Multipart 처리
+            logger.info("📦 Processing as MULTIPART")
+            form = await request.form()
+            
+            email = form.get("email")
+            nickname = form.get("nickname")
+            full_name = form.get("full_name")  # full_name도 지원
+            phone_number = form.get("phone_number")  # 전화번호 추가
+            cat_pattern = form.get("cat_pattern")
+            cat_color = form.get("cat_color")
+            duress_code = form.get("duress_code")
+            
+            profile_image = form.get("profile_image")
+            meow_audio = form.get("meow_audio")
+            duress_audio = form.get("duress_audio")
+            
+            logger.info(f"📝 Update fields: email={email}, nickname={nickname}, full_name={full_name}, phone={phone_number}")
+            
+            # 파일 업로드 처리
+            profile_image_url = None
+            meow_audio_url = None
+            duress_audio_url = None
+            
+            if profile_image and hasattr(profile_image, 'filename'):
+                logger.info(f"📤 Uploading profile image: {profile_image.filename}")
+                profile_image_url = await s3_service.upload_profile_image(profile_image, user_id)
+                logger.info(f"✅ Uploaded: {profile_image_url}")
+            
+            if meow_audio and hasattr(meow_audio, 'filename'):
+                logger.info(f"📤 Uploading meow audio: {meow_audio.filename}")
+                meow_audio_url = await s3_service.upload_meow_audio(meow_audio, user_id)
+                logger.info(f"✅ Uploaded: {meow_audio_url}")
+            
+            if duress_audio and hasattr(duress_audio, 'filename'):
+                logger.info(f"📤 Uploading duress audio: {duress_audio.filename}")
+                duress_audio_url = await s3_service.upload_duress_audio(duress_audio, user_id)
+                logger.info(f"✅ Uploaded: {duress_audio_url}")
+            
+            # UserUpdate 스키마 생성
+            profile_data = UserUpdate(
+                email=email,
+                nickname=nickname,
+                full_name=full_name,
+                phone_number=phone_number,  # 전화번호 추가
+                cat_pattern=cat_pattern,
+                cat_color=cat_color,
+                duress_code=duress_code,
+                profile_image_url=profile_image_url,
+                meow_audio_url=meow_audio_url
+            )
+            
+        else:
+            # JSON 처리
+            logger.info("📄 Processing as JSON")
+            body = await request.json()
+            profile_data = UserUpdate(**body)
+            logger.info(f"📝 Request Body: {profile_data.model_dump(exclude_unset=True)}")
+        
+        # 프로필 업데이트
+        updated_user = await user_service.update_user(user_id, profile_data)
+        
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+            )
+        
+        response_data = success_response(
+            data=UserResponse.model_validate(updated_user),
+            message="Profile updated successfully"
+        )
+        
+        logger.info(f"✅ UPDATE_PROFILE SUCCESS: user_id={user_id}")
+        
+        return response_data
+        
+    except Exception as e:
+        logger.error(f"❌ UPDATE_PROFILE ERROR: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(message=str(e), error_code="UPDATE_ERROR")
+        )
+
+
+@router.post("/setup-profile/{user_id}", response_model=dict)
+async def setup_profile(
+    user_id: str,
+    nickname: str = Form(...),
+    cat_pattern: Optional[str] = Form(None),
+    cat_color: Optional[str] = Form(None),
+    profile_image: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """
+    프로필 설정 (Multipart/form-data 지원)
+    
+    - user_id는 URL 맨 뒤에 명시
+    - 인증 불필요
+    
+    필수 필드:
+    - nickname: 닉네임
+    
+    선택 필드:
+    - cat_pattern: 고양이 패턴
+    - cat_color: 고양이 색상
+    - profile_image: 프로필 이미지 파일
+    """
+    logger.info(f"🔥 SETUP_PROFILE REQUEST: user_id={user_id}")
+    logger.info(f"📝 Nickname: {nickname}, Pattern: {cat_pattern}, Color: {cat_color}")
+    
+    if profile_image:
+        logger.info(f"🖼️ Profile image: {profile_image.filename}")
+    
+    try:
+        user_service = UserService(db)
+        
+        # 파일 업로드 처리
+        profile_image_url = None
+        if profile_image:
+            logger.info(f"📤 Uploading profile image to S3...")
+            profile_image_url = await s3_service.upload_profile_image(profile_image, user_id)
+            logger.info(f"✅ Profile image uploaded: {profile_image_url}")
+        
+        # ProfileSetupData 생성
+        profile_dict = {
+            "nickname": nickname,
+            "cat_pattern": cat_pattern,
+            "cat_color": cat_color
+        }
+        
+        updated_user = await user_service.setup_user_profile(user_id, profile_dict)
+        
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+            )
+        
+        # profile_image_url 별도 업데이트
+        if profile_image_url:
+            updated_user.profile_image_url = profile_image_url
+            db.commit()
+            db.refresh(updated_user)
+        
+        logger.info(f"✅ SETUP_PROFILE SUCCESS: user_id={user_id}")
+        
+        return success_response(
+            data=UserResponse.model_validate(updated_user),
+            message="Profile setup completed successfully"
+        )
+    except Exception as e:
+        logger.error(f"❌ SETUP_PROFILE ERROR: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(message=str(e), error_code="PROFILE_SETUP_ERROR")
+        )
+
+
+@router.get("/{user_id}", response_model=dict)
+async def get_user(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    특정 사용자 조회
+    
+    Parameters:
+    - user_id: 조회할 사용자 ID (예: 12345678)
+    
+    예시:
+    - user_id: 12345678 (고양이집사1)
+    - user_id: 23456789 (고양이집사2)
+    - user_id: 87654321 (내닉네임)
+    """
+    user_service = UserService(db)
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+        )
+    
+    return success_response(
+        data=UserResponse.model_validate(user),
+        message="User retrieved successfully"
+    )
+
+
+@router.get("/friend-code-lookup/{friend_code}", response_model=dict)
+async def get_user_by_friend_code(
+    friend_code: str,
+    db: Session = Depends(get_db)
+):
+    """
+    친구 코드로 사용자 조회
+    
+    Parameters:
+    - friend_code: 조회할 사용자의 친구 코드 (예: ABC123)
+    
+    예시:
+    - friend_code: ABC123
+    - friend_code: DEF456
+    """
+    user_service = UserService(db)
+    user = await user_service.get_user_by_friend_code(friend_code)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found with this friend code", error_code="USER_NOT_FOUND")
+        )
+    
+    return success_response(
+        data=UserResponse.model_validate(user),
+        message="User found by friend code"
+    )
+
+
+@router.get("/phone/{user_id}", response_model=dict)
+async def get_user_phone_number(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    사용자 전화번호 조회
+    
+    Parameters:
+    - user_id: 조회할 사용자 ID
+    
+    Returns:
+    - user_id: 사용자 ID
+    - phone_number: 전화번호 (없으면 null)
+    
+    예시:
+    - GET /api/v1/users/phone/c478cd4c-5071-7060-2991-cc9b3bb59dff
+    """
+    logger.info(f"🔥 GET_PHONE_NUMBER REQUEST: user_id={user_id}")
+    
+    user_service = UserService(db)
+    user = await user_service.get_user_by_id(user_id)
+    
+    if not user:
+        logger.error(f"❌ User not found: user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+        )
+    
+    logger.info(f"✅ Phone number retrieved: user_id={user_id}, phone={user.phone_number}")
+    
+    return success_response(
+        data={
+            "user_id": user.user_id,
+            "phone_number": user.phone_number
+        },
+        message="Phone number retrieved successfully"
+    )
+

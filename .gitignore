@@ -1,0 +1,116 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+**/env
+**/.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+test.db
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Documentation (temporary/work files - may contain sensitive info)
+WORK_SUMMARY_*.md
+*_SUMMARY.md
+*_CHECKLIST.md
+*_GUIDE.md
+*_PLAN.md
+*_REPORT.md
+*_DESIGN.md
+*_FEATURE.md
+*_COMMANDS*.md
+*_INTERIM_*.md
+*_COMPREHENSIVE_*.md
+PROJECT_CONTEXT_FOR_AI.md
+DEPLOY_PHONE_API*.md
+EC2_*.md
+EKS_*.md
+
+# Deployment scripts (keep in repo but can exclude if needed)
+# deploy*.sh
+# deploy*.ps1
+# cleanup*.ps1
+# setup*.sh
+# setup*.ps1
+
+# Test/dummy data scripts
+setup_dummy_*.py
+setup_friend_*.py
+insert_dummy_*.sql
+insert_sample_*.sql
+insert_*_challenges.py
+insert_*_challenges.sql
+check_db.py
+create_challenge_tables.py
+
+# AWS/Infrastructure (contains sensitive data)
+ec2-setup/
+deploy_ec2_with_s3.sh
+deploy-phone-api-to-ec2.sh
+deploy-phone-api-to-ec2.ps1
+
+# Kubernetes secrets (contains sensitive data)
+k8s/secret.yaml
+k8s/*secret*.yaml
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS
+Thumbs.db
+.DS_Store
