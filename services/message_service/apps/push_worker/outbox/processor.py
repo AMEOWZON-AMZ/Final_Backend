@@ -56,7 +56,12 @@ def handle_event(event: dict, already_claimed: bool = False):
             errors.append(f"missing token:{user_id}")
             continue
 
-        ok, error = send_fcm(token, payload, event_type=event_type)
+        ok, error = send_fcm(
+            token,
+            payload,
+            event_type=event_type,
+            target_user_id=user_id,
+        )
         if ok:
             sent_count += 1
         else:

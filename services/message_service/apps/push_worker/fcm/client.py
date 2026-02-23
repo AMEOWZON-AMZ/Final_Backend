@@ -1,5 +1,6 @@
 import os
 import json
+from services.message_service.apps.msg_service.repositories.friend_repo import FriendRepository
 
 try:
     import requests
@@ -34,7 +35,11 @@ def _get_access_token():
     return creds.token, None
 
 
-def _build_critical_push_data(payload: dict, event_type: str | None) -> dict[str, str] | None:
+def _build_critical_push_data(
+    payload: dict,
+    event_type: str | None,
+    target_user_id: str | None = None,
+) -> dict[str, str] | None:
     if event_type != "CRITICAL_ALERT":
         return None
 
@@ -66,9 +71,24 @@ def _build_critical_push_data(payload: dict, event_type: str | None) -> dict[str
     if isinstance(from_user_id, str) and from_user_id.strip():
         fcm_data["from_user_id"] = from_user_id.strip()
 
-    to_user_id = inner.get("to_user_id")
+    to_user_id = target_user_id if isinstance(target_user_id, str) and target_user_id.strip() else inner.get("to_user_id")
     if isinstance(to_user_id, str) and to_user_id.strip():
         fcm_data["to_user_id"] = to_user_id.strip()
+
+    from_id = fcm_data.get("from_user_id")
+    to_id = fcm_data.get("to_user_id")
+    if from_id and to_id:
+        try:
+            nickname = FriendRepository().get_friend_nickname(user_id=to_id, friend_user_id=from_id)
+            if nickname:
+                fcm_data["nickname"] = nickname
+        except Exception as exc:
+            print(
+                "[FCM] nickname lookup failed",
+                f"from_user_id={from_id}",
+                f"to_user_id={to_id}",
+                f"error={exc}",
+            )
 
     return fcm_data
 
@@ -87,7 +107,12 @@ def _parse_data_payload(raw) -> dict | None:
     return None
 
 
-def send_fcm(token: str, payload: dict, event_type: str | None = None):
+def send_fcm(
+    token: str,
+    payload: dict,
+    event_type: str | None = None,
+    target_user_id: str | None = None,
+):
     # FCM notification payload 전송.
     if requests is None:
         return False, "requests not installed"
@@ -101,7 +126,11 @@ def send_fcm(token: str, payload: dict, event_type: str | None = None):
         return False, err
 
     url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
-    critical_data = _build_critical_push_data(payload, event_type=event_type)
+    critical_data = _build_critical_push_data(
+        payload,
+        event_type=event_type,
+        target_user_id=target_user_id,
+    )
     message = {
         "token": token,
     }
