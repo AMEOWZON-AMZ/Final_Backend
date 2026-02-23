@@ -1,11 +1,17 @@
 # inference-service
 
 ## Overview
-This service receives inference events and updates DynamoDB state.
+This service updates DynamoDB state from inference outputs.
 
-- `POST /events/daily-status`
+- `POST /jobs/daily-status-sync`
+  - Reads `s3://<bucket>/<prefix>/dt=YYYY-MM-DD/state_out.csv`
+  - Required CSV columns: `uuid`, `date`, `cat_state`
+  - Maps `uuid -> user_id`, `cat_state -> daily_status`
   - Updates `user_status.current_daily_status`
   - Fanout updates `user_friends.daily_status` via GSI
+- Automatic scheduler
+  - Runs every day at `DAILY_STATUS_SYNC_HOUR` (default `06:00`) in `DAILY_STATUS_SYNC_TIMEZONE`
+  - Loads previous day folder (`dt=YYYY-MM-DD`)
 - `POST /events/critical`
   - Marks user as critical (one-time)
   - Writes `critical_contacts` snapshot
@@ -20,6 +26,13 @@ This service receives inference events and updates DynamoDB state.
    - `python services/inference_service/scripts/check_ddb_connection.py`
 4. Run API:
    - `uvicorn services.inference_service.app.main:app --reload --port 8003`
+
+### Sync env vars
+- `DAILY_STATUS_SYNC_ENABLED` (default: `true`)
+- `DAILY_STATUS_S3_BUCKET` (default: `nyang-ml-apne2-dev`)
+- `DAILY_STATUS_S3_PREFIX` (default: `outputs`)
+- `DAILY_STATUS_SYNC_TIMEZONE` (default: `Asia/Seoul`)
+- `DAILY_STATUS_SYNC_HOUR` (default: `6`)
 
 ## EKS manifests
 `services/inference_service/deploy/k8s`

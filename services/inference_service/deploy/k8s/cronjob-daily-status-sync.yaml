@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: daily-status-sync
+spec:
+  schedule: "0 6 * * *"
+  timeZone: "Asia/Seoul"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: inference-service-sa
+          restartPolicy: OnFailure
+          containers:
+            - name: daily-status-sync
+              image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/inference-service:0.7
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "services.inference_service.app.jobs.daily_status_sync_job"]
+              envFrom:
+                - configMapRef:
+                    name: inference-config

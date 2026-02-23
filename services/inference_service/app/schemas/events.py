@@ -3,7 +3,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
-DailyStatus = Literal["STABLE", "SLEEP", "LETHARGY", "CHAOTIC", "NO_DATA","TRAVEL"]
+DailyStatus = Literal["STABLE", "SLEEP", "LETHARGY", "CHAOS", "NO_DATA","TRAVEL"]
 
 
 class DailyStatusEventRequest(BaseModel):
