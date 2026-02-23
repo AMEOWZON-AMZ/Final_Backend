@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: generate-monthly-challenges
+  namespace: user-service
+spec:
+  # 매월 말일 오후 11시 (KST 기준, UTC로는 14시)
+  # 다음 달 챌린지를 미리 생성
+  schedule: "0 14 28-31 * *"
+  timeZone: "Asia/Seoul"  # Kubernetes 1.25+에서 지원
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid  # 동시 실행 방지
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: generate-challenges
+        spec:
+          serviceAccountName: user-service-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: generate-challenges
+            image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/user-service:latest
+            command:
+            - python
+            - -c
+            - |
+              import requests
+              import sys
+              from datetime import datetime
+              
+              # 28-31일에 실행되므로, 실제 말일인지 확인
+              today = datetime.now()
+              # 다음 달 1일을 구한 후 하루 빼면 이번 달 말일
+              if today.month == 12:
+                  next_month_first = datetime(today.year + 1, 1, 1)
+              else:
+                  next_month_first = datetime(today.year, today.month + 1, 1)
+              
+              from datetime import timedelta
+              last_day_of_month = (next_month_first - timedelta(days=1)).day
+              
+              # 오늘이 말일이 아니면 스킵
+              if today.day != last_day_of_month:
+                  print(f"⏭️  Skipping: Today is {today.day}, last day is {last_day_of_month}")
+                  sys.exit(0)
+              
+              # 내부 Service DNS 사용 (클러스터 내부 통신)
+              url = "http://user-service.user-service.svc.cluster.local:8000/api/v1/challenges/generate-next-month"
+              
+              try:
+                  print(f"🎯 Calling challenge generation API on last day of month ({today.day})...")
+                  response = requests.post(url, timeout=300)
+                  
+                  if response.status_code == 200:
+                      data = response.json()
+                      print(f"✅ Success: {data}")
+                      sys.exit(0)
+                  else:
+                      print(f"❌ Failed: {response.status_code} - {response.text}")
+                      sys.exit(1)
+              except Exception as e:
+                  print(f"❌ Error: {e}")
+                  import traceback
+                  traceback.print_exc()
+                  sys.exit(1)
+            envFrom:
+            - configMapRef:
+                name: user-service-config
+            - secretRef:
+                name: user-service-secret
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"

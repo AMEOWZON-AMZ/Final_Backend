@@ -1,0 +1,77 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Test files
+test_*.py
+*_test.py
+tests/
+.pytest_cache/
+
+# Documentation
+*.md
+docs/
+
+# Git
+.git/
+.gitignore
+
+# Docker
+Dockerfile*
+docker-compose*
+
+# Kubernetes
+k8s/
+*.yaml
+*.yml
+
+# Analysis files
+*_analysis.py
+*_checklist.py
+*_check.py
+comprehensive_*.py
+project_status_*.py
+eks_deployment_*.py
+revised_priority_*.py

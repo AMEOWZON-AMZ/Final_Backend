@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: user-service
+  labels:
+    app: user-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      serviceAccountName: user-service-sa  # Pod Identity ServiceAccount
+      containers:
+      - name: user-service
+        image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/user-service:latest
+        imagePullPolicy: Always  # ECR에서 항상 최신 이미지 가져오기
+        command:
+        - "gunicorn"
+        - "-k"
+        - "uvicorn.workers.UvicornWorker"
+        - "-w"
+        - "2"
+        - "-b"
+        - "0.0.0.0:8000"
+        - "-t"
+        - "120"
+        - "--graceful-timeout"
+        - "30"
+        - "app.main:app"
+        ports:
+        - containerPort: 8000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: user-service-config
+        - secretRef:
+            name: user-service-secret
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 90
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 40
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        volumeMounts:
+        - name: data-volume
+          mountPath: /app/data
+      volumes:
+      - name: data-volume
+        emptyDir: {}
+      restartPolicy: Always
