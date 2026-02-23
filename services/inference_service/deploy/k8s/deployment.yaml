@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-service
+  template:
+    metadata:
+      labels:
+        app: inference-service
+    spec:
+      serviceAccountName: inference-service-sa
+      containers:
+        - name: inference-service
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/inference-service:0.7
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: inference-config

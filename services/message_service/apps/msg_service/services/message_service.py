@@ -27,6 +27,7 @@ class MessageService:
             to_user_id=payload.to_user_id,
             body=payload.body,
             created_at=created_at,
+            nickname=payload.nickname
         )
         title, body = random_message_push_text(payload.body)
 

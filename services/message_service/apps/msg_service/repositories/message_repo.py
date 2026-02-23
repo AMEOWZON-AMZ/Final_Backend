@@ -20,7 +20,7 @@ class MessageRepository:
     #     )
 
     # 메시지 아이템 생성(트랜잭션에서 재사용).
-    def build_message_item(self, message_id, from_user_id, to_user_id, body, created_at):
+    def build_message_item(self, message_id, from_user_id, to_user_id, body, created_at,nickname):
         return {
             "pk": f"RECEIVER#{to_user_id}",
             "sk": f"{created_at}#{message_id}",
@@ -29,6 +29,7 @@ class MessageRepository:
             "to_user_id": to_user_id,
             "body": body,
             "created_at": created_at,
+            "nickname": nickname
         }
 
     # 메시지 + Outbox를 단일 트랜잭션으로 저장.
