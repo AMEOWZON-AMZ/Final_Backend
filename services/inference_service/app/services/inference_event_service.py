@@ -1,5 +1,6 @@
 import csv
 import io
+import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -8,6 +9,7 @@ from botocore.exceptions import ClientError
 
 from services.inference_service.app.core.config import settings
 from services.inference_service.app.repositories.critical_event_tx_repo import CriticalEventTransactionRepository
+from services.inference_service.app.repositories.outbox_repo import OutboxRepository
 from services.inference_service.app.repositories.user_friends_repo import UserFriendsRepository
 from services.inference_service.app.repositories.user_status_repo import UserStatusRepository
 from services.inference_service.app.schemas.events import CriticalEventRequest, DailyStatusEventRequest
@@ -21,6 +23,7 @@ class InferenceEventService:
         self.user_status_repo = UserStatusRepository()
         self.user_friends_repo = UserFriendsRepository()
         self.critical_tx_repo = CriticalEventTransactionRepository()
+        self.outbox_repo = OutboxRepository()
 
     def handle_daily_status(self, payload: DailyStatusEventRequest) -> dict:
         now_iso = now_utc_iso()
@@ -47,6 +50,7 @@ class InferenceEventService:
         )
 
         fanout_updated = 0
+        fanout_user_ids: list[str] = []
         last_key = None
         while True:
             resp = self.user_friends_repo.query_by_friend_user_id(
@@ -62,6 +66,9 @@ class InferenceEventService:
                     updated_at=now_iso,
                 )
                 fanout_updated += 1
+                target_user_id = item.get("user_id")
+                if isinstance(target_user_id, str) and target_user_id:
+                    fanout_user_ids.append(target_user_id)
 
             last_key = resp.get("LastEvaluatedKey")
             if not last_key:
@@ -71,6 +78,7 @@ class InferenceEventService:
             "action": "UPDATED",
             "daily_status": payload.daily_status,
             "fanout_updated": fanout_updated,
+            "fanout_user_ids": fanout_user_ids,
             "updated_at": now_iso,
         }
 
@@ -119,6 +127,7 @@ class InferenceEventService:
             "skipped": 0,
             "errors": 0,
         }
+        refresh_target_user_ids: set[str] = set()
 
         for row in reader:
             summary["processed"] += 1
@@ -131,6 +140,10 @@ class InferenceEventService:
                 summary["errors"] += 1
                 continue
 
+            # Always enqueue refresh for users present in the CSV,
+            # even when the inferred status did not change.
+            refresh_target_user_ids.add(user_id)
+
             try:
                 result = self.handle_daily_status(
                     DailyStatusEventRequest(
@@ -141,10 +154,20 @@ class InferenceEventService:
                 )
                 if result.get("action") == "UPDATED":
                     summary["updated"] += 1
+                    refresh_target_user_ids.add(user_id)
+                    fanout_user_ids = result.get("fanout_user_ids") or []
+                    for target_user_id in fanout_user_ids:
+                        if isinstance(target_user_id, str) and target_user_id.strip():
+                            refresh_target_user_ids.add(target_user_id.strip())
                 else:
                     summary["skipped"] += 1
             except ValueError:
                 summary["errors"] += 1
+
+        summary["refresh_enqueued"] = self._enqueue_state_refresh_events(
+            target_user_ids=refresh_target_user_ids,
+            target_date=run_date,
+        )
 
         return summary
 
@@ -152,6 +175,40 @@ class InferenceEventService:
         tz = ZoneInfo(settings.daily_status_sync_timezone)
         local_today = datetime.now(tz).date()
         return local_today - timedelta(days=1)
+
+    def _enqueue_state_refresh_events(self, target_user_ids: set[str], target_date: str) -> int:
+        if not target_user_ids:
+            return 0
+
+        created_at = now_utc_iso()
+        enqueued = 0
+        for to_user_id in target_user_ids:
+            event_id = f"STATE_REFRESH#{target_date}#{to_user_id}#{uuid.uuid4().hex[:8]}"
+            item = {
+                "pk": f"EVENT#{event_id}",
+                "sk": "EVENT",
+                "event_id": event_id,
+                "event_type": "STATE_REFRESH",
+                "status": "PENDING",
+                "attempt_count": 0,
+                "next_retry_at": created_at,
+                "created_at": created_at,
+                "payload": {
+                    "to_user_id": to_user_id,
+                    "data": {
+                        "event_type": "STATE_REFRESH",
+                        "refresh": "1",
+                        "source": "DAILY_STATUS_SYNC",
+                        "target_date": target_date,
+                        "updated_at": created_at,
+                    },
+                },
+                "last_error": None,
+            }
+            self.outbox_repo.put_event(item)
+            enqueued += 1
+
+        return enqueued
 
     def handle_critical_event(self, payload: CriticalEventRequest) -> dict:
         now_iso = now_utc_iso()

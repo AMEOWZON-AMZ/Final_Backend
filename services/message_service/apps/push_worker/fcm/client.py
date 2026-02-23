@@ -93,6 +93,48 @@ def _build_critical_push_data(
     return fcm_data
 
 
+def _to_fcm_data_value(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _build_state_refresh_data(
+    payload: dict,
+    event_type: str | None,
+    target_user_id: str | None = None,
+) -> dict[str, str] | None:
+    if event_type != "STATE_REFRESH":
+        return None
+
+    parsed = _parse_data_payload(payload.get("data")) or {}
+    fcm_data: dict[str, str] = {
+        "event_type": "STATE_REFRESH",
+        "refresh": "1",
+    }
+
+    for key, value in parsed.items():
+        if not isinstance(key, str):
+            continue
+        converted = _to_fcm_data_value(value)
+        if converted is not None:
+            fcm_data[key] = converted
+
+    to_user_id = target_user_id if isinstance(target_user_id, str) and target_user_id.strip() else payload.get("to_user_id")
+    if isinstance(to_user_id, str) and to_user_id.strip():
+        fcm_data["to_user_id"] = to_user_id.strip()
+
+    return fcm_data
+
+
 def _parse_data_payload(raw) -> dict | None:
     if isinstance(raw, dict):
         return raw
@@ -131,6 +173,11 @@ def send_fcm(
         event_type=event_type,
         target_user_id=target_user_id,
     )
+    state_refresh_data = _build_state_refresh_data(
+        payload,
+        event_type=event_type,
+        target_user_id=target_user_id,
+    )
     message = {
         "token": token,
     }
@@ -142,6 +189,14 @@ def send_fcm(
             f"db_event_type={event_type}",
             f"event_type={critical_data.get('event_type')}",
             f"to_user_id={critical_data.get('to_user_id')}",
+        )
+    elif state_refresh_data:
+        message["data"] = state_refresh_data
+        print(
+            "[FCM] mode=data-only",
+            f"db_event_type={event_type}",
+            f"event_type={state_refresh_data.get('event_type')}",
+            f"to_user_id={state_refresh_data.get('to_user_id')}",
         )
     else:
         notification = {
