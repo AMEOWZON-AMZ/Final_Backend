@@ -150,41 +150,68 @@ class S3Service:
         except Exception as e:
             logger.error(f"Unexpected error during upload: {e}")
             raise HTTPException(status_code=500, detail="File upload failed")
-    
+
     async def upload_meow_audio(self, file: UploadFile, user_id: str) -> str:
-        """야옹 소리 음성 파일 업로드"""
+        """야옹 소리 음성 파일 업로드 (AudioGuard 통과 시 WAV로 정규화 저장)"""
         if not self.s3_client:
             raise HTTPException(status_code=500, detail="S3 service not available")
-        
-        # 파일 검증
+
+        # 기본 파일 검증 (확장자/콘텐트 타입 정도만)
         is_valid, message = self._validate_file(file, "audio")
         if not is_valid:
             raise HTTPException(status_code=400, detail=message)
-        
+
+        # 1) 원본 bytes 읽기 (seek 불필요: 여기서 1회만 read)
+        raw_bytes = await file.read()
+
+        # 2) AudioGuard 처리
+        from app.services.audio_guard import audio_guard
+        guard = audio_guard.process(raw_bytes=raw_bytes, filename=file.filename or "")
+
+        if guard.get("status") != "OK":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Invalid meow audio",
+                    "reason": guard.get("reason"),
+                    "metrics": guard.get("metrics"),
+                    "stt_text": guard.get("stt_text"),
+                }
+            )
+
+        # 3) OK면 항상 WAV로 저장 (audio_bytes 방어)
+        wav_bytes = guard.get("audio_bytes")
+        if not wav_bytes:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": "AudioGuard returned OK but no audio_bytes",
+                    "reason": guard.get("reason"),
+                    "metrics": guard.get("metrics"),
+                },
+            )
+
+        file_key = self._generate_file_key(user_id, "meow_audio", "wav")
+
         try:
-            # 파일 키 생성
-            file_extension = self._get_file_extension(file.filename)
-            file_key = self._generate_file_key(user_id, "meow_audio", file_extension)
-            
-            # S3 업로드
-            file_content = await file.read()
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=file_key,
-                Body=file_content,
-                ContentType=file.content_type,
+                Body=wav_bytes,
+                ContentType="audio/wav",
                 Metadata={
-                    'user_id': user_id,
-                    'file_type': 'meow_audio',
-                    'original_filename': file.filename
+                    "user_id": user_id,
+                    "file_type": "meow_audio",
+                    "original_filename": file.filename or "",
+                    "guard_reason": guard.get("reason", ""),
+                    "stt_text": (guard.get("stt_text") or "")[:200],
                 }
             )
-            
-            # URL 생성
+
             file_url = f"{self.base_url}/{file_key}"
-            logger.info(f"Meow audio uploaded successfully: {file_url}")
+            logger.info(f"Meow audio uploaded (WAV) successfully: {file_url}")
             return file_url
-            
+
         except ClientError as e:
             logger.error(f"S3 upload error: {e}")
             raise HTTPException(status_code=500, detail="Failed to upload audio to S3")

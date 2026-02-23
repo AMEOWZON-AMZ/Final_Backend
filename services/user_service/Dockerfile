@@ -21,6 +21,9 @@ FROM python:3.11-slim
 # Install curl for health check
 RUN apt-get update && apt-get install -y \
     curl \
+    ffmpeg \
+    libsndfile1 \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user for security
