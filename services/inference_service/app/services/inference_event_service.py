@@ -1,7 +1,7 @@
 import csv
 import io
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import boto3
@@ -83,7 +83,7 @@ class InferenceEventService:
         }
 
     def sync_daily_status_from_s3(self, target_date: str | None = None) -> dict:
-        run_date = target_date or self._yesterday_in_sync_timezone().isoformat()
+        run_date = target_date or self._today_in_sync_timezone().isoformat()
         try:
             datetime.strptime(run_date, "%Y-%m-%d")
         except ValueError as exc:
@@ -171,10 +171,10 @@ class InferenceEventService:
 
         return summary
 
-    def _yesterday_in_sync_timezone(self) -> date:
+    def _today_in_sync_timezone(self) -> date:
         tz = ZoneInfo(settings.daily_status_sync_timezone)
         local_today = datetime.now(tz).date()
-        return local_today - timedelta(days=1)
+        return local_today
 
     def _enqueue_state_refresh_events(self, target_user_ids: set[str], target_date: str) -> int:
         if not target_user_ids:
