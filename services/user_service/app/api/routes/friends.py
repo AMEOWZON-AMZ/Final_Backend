@@ -1,1 +1,0 @@
-# Friends routes - 새로운 친구 관련 라우트
