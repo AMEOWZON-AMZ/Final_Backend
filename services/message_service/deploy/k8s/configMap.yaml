@@ -10,7 +10,7 @@ data:
   DDB_HEARTS_TABLE: "Hearts"
   DDB_OUTBOX_TABLE: "OutboxEvents"
   DDB_DEVICE_TOKENS_TABLE: "DeviceTokens"
-  DDB_FRIENDS_TABLE: "Friends"
+  DDB_FRIENDS_TABLE: "user_friends"
   DDB_AUDIT_TABLE: "AuditEvents"
 
   SQS_QUEUE_URL: ""
