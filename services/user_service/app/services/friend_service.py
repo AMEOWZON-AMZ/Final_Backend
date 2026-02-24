@@ -1,1 +1,0 @@
-# Friend service - 기존 내용 유지
