@@ -405,15 +405,16 @@ class AudioGuard:
     # ──────────────────────────────────────────────────────────────
 
     def _run_stt(self, samples: np.ndarray) -> Optional[str]:
-        """Transcribe Streaming 호출. 실패 시 None 반환."""
+        """Transcribe 호출. 실패 시 None 반환."""
         pcm_int16 = (
             (samples * 32767).clip(-32768, 32767).astype(np.int16)
         )
         pcm_bytes = pcm_int16.tobytes()
 
         try:
-            from app.services.transcribe_service import transcribe_service
-            result = transcribe_service.transcribe_pcm(
+            # Simple Transcribe 사용 (Streaming 대신)
+            from app.services.transcribe_service_simple import simple_transcribe_service
+            result = simple_transcribe_service.transcribe_pcm(
                 pcm_bytes, SAMPLE_RATE
             )
             return result
