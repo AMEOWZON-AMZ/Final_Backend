@@ -114,8 +114,11 @@ class DynamoDBService:
         try:
             response = self.friends_table.query(
                 KeyConditionExpression='user_id = :user_id',
-                FilterExpression='#status = :status AND friend_user_id <> :user_id',  # 자기 자신 제외
-                ExpressionAttributeNames={'#status': 'status'},
+                FilterExpression='#status = :status AND #friend_user_id <> :user_id',  # 자기 자신 제외
+                ExpressionAttributeNames={
+                    '#status': 'status',
+                    '#friend_user_id': 'friend_user_id'
+                },
                 ExpressionAttributeValues={
                     ':user_id': user_id,
                     ':status': 'accepted'

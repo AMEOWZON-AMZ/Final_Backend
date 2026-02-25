@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 LANGUAGE_CODE = "ko-KR"
 MEDIA_ENCODING = "pcm"
 CHUNK_SIZE = 1024 * 8
-TRANSCRIBE_TIMEOUT_S = 8
+TRANSCRIBE_TIMEOUT_S = 30  # 8초 → 30초로 증가
 REGION = settings.AWS_REGION  # ap-northeast-2
 
 # ✅ 전역 executor (요청마다 만들지 않기)
