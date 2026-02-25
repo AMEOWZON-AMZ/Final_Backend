@@ -1,4 +1,4 @@
-apiVersion: batch/v1
+﻿apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: daily-status-sync
@@ -6,10 +6,11 @@ spec:
   schedule: "0 6 * * *"
   timeZone: "Asia/Seoul"
   concurrencyPolicy: Forbid
-  successfulJobsHistoryLimit: 3
-  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      ttlSecondsAfterFinished: 3600
       backoffLimit: 2
       template:
         spec:
@@ -17,9 +18,35 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: daily-status-sync
-              image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/inference-service:0.7
+              image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/inference-service:1.0
               imagePullPolicy: IfNotPresent
               command: ["python", "-m", "services.inference_service.app.jobs.daily_status_sync_job"]
+              env:
+                - name: AWS_STS_REGIONAL_ENDPOINTS
+                  value: regional
+                - name: AWS_DEFAULT_REGION
+                  value: ap-northeast-2
+                - name: AWS_REGION
+                  value: ap-northeast-2
+                - name: AWS_ROLE_ARN
+                  value: arn:aws:iam::715428147916:role/msg-service-irsa-role
+                - name: AWS_WEB_IDENTITY_TOKEN_FILE
+                  value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
               envFrom:
                 - configMapRef:
                     name: inference-config
+              volumeMounts:
+                - name: aws-iam-token
+                  mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+                  readOnly: true
+          volumes:
+            - name: aws-iam-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: sts.amazonaws.com
+                      expirationSeconds: 86400
+                      path: token
+
+
+

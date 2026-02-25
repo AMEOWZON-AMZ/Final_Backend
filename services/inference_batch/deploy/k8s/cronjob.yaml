@@ -6,21 +6,37 @@ metadata:
 spec:
   schedule: "0 1 * * *"
   timeZone: "Asia/Seoul"
-  successfulJobsHistoryLimit: 2
-  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      ttlSecondsAfterFinished: 3600
       template:
         spec:
           serviceAccountName: inference-batch-sa
           restartPolicy: OnFailure
           containers:
             - name: inference-batch
-              image: your-registry/inference-batch:latest
+              image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/inference-batch:0.3
               imagePullPolicy: IfNotPresent
+              env:
+                - name: AWS_STS_REGIONAL_ENDPOINTS
+                  value: regional
+                - name: AWS_DEFAULT_REGION
+                  value: ap-northeast-2
+                - name: AWS_REGION
+                  value: ap-northeast-2
+                - name: AWS_ROLE_ARN
+                  value: arn:aws:iam::715428147916:role/msg-service-irsa-role
+                - name: AWS_WEB_IDENTITY_TOKEN_FILE
+                  value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
               envFrom:
                 - configMapRef:
                     name: inference-batch-config
+              volumeMounts:
+                - name: aws-iam-token
+                  mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+                  readOnly: true
               command: ["python", "src/runtime/batch_runner.py"]
               args:
                 - "--s3-silver-uri"
@@ -33,3 +49,15 @@ spec:
                 - "$(MODEL_URI)"
                 - "--s3-output-uri"
                 - "$(S3_OUTPUT_URI)"
+          volumes:
+            - name: aws-iam-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: sts.amazonaws.com
+                      expirationSeconds: 86400
+                      path: token
+
+
+
+

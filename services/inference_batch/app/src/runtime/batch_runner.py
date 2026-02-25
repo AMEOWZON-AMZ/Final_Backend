@@ -39,8 +39,8 @@ KST = timezone(timedelta(hours=9))
 LT_WINDOW = 31  # LT(30) + shift(1) 여유 1일
 
 
-def today_kst() -> str:
-    return datetime.now(KST).strftime("%Y-%m-%d")
+def yesterday_kst() -> str:
+    return (datetime.now(KST) - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +215,7 @@ def save_output_to_s3(state_df: pd.DataFrame, s3_output_uri: str, target_date: s
 # ---------------------------------------------------------------------------
 
 def main(args):
-    target_date = args.target_date or today_kst()
+    target_date = args.target_date or yesterday_kst()
 
     print("=" * 60)
     print(f"[BATCH] 실행: {target_date}")
@@ -262,7 +262,7 @@ def parse_args():
     parser.add_argument(
         "--s3-silver-uri",
         type=str,
-        default=os.environ.get("S3_SILVER_URI", "s3://silver-dummy/silver_events/"),
+        default=os.environ.get("S3_SILVER_URI", "s3://ameowzon-silver/events/"),
         help="silver parquet S3 URI",
     )
     parser.add_argument(
