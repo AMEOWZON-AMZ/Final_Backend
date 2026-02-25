@@ -289,7 +289,7 @@ class ChallengeService:
         longitude: Optional[float] = None,
         altitude: Optional[float] = None
     ) -> SubmissionResponse:
-        """챌린지 제출 (GPS 좌표 포함)"""
+        """챌린지 제출 (GPS 좌표 포함) - 여러 장 제출 가능"""
         # 챌린지 존재 확인
         challenge = db.query(ChallengeDay).filter(
             ChallengeDay.id == challenge_day_id
@@ -309,37 +309,7 @@ class ChallengeService:
         # GPS 정보 유무 확인
         has_gps = latitude is not None and longitude is not None
         
-        # 이미 제출했는지 확인
-        existing_submission = db.query(ChallengeSubmission).filter(
-            ChallengeSubmission.challenge_day_id == challenge_day_id,
-            ChallengeSubmission.user_id == user_id
-        ).first()
-        
-        if existing_submission:
-            # 덮어쓰기: 기존 제출 업데이트
-            existing_submission.image_url = image_url
-            existing_submission.latitude = latitude
-            existing_submission.longitude = longitude
-            existing_submission.altitude = altitude
-            existing_submission.has_gps = has_gps
-            existing_submission.created_at = datetime.now()
-            db.commit()
-            db.refresh(existing_submission)
-            
-            logger.info(f"Challenge submission updated: {existing_submission.id}, GPS: {has_gps}")
-            return SubmissionResponse(
-                id=existing_submission.id,
-                challenge_day_id=existing_submission.challenge_day_id,
-                user_id=existing_submission.user_id,
-                image_url=existing_submission.image_url,
-                latitude=existing_submission.latitude,
-                longitude=existing_submission.longitude,
-                altitude=existing_submission.altitude,
-                has_gps=existing_submission.has_gps,
-                created_at=existing_submission.created_at
-            )
-        
-        # 새 제출 생성
+        # 새 제출 생성 (여러 장 제출 가능)
         new_submission = ChallengeSubmission(
             challenge_day_id=challenge_day_id,
             user_id=user_id,

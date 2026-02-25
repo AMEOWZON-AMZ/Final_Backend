@@ -373,6 +373,15 @@ class UserService:
         if not success:
             raise ValueError("Failed to send friend request")
         
+        # 친구 요청 이벤트 저장 (Push Worker가 FCM 전송)
+        from app.services.friend_event_service import friend_event_service
+        friend_event_service.enqueue_friend_request(
+            to_user_id=target_user.user_id,
+            from_user_id=current_user.user_id,
+            from_nickname=current_user.nickname
+        )
+        logger.info(f"✅ Friend request event enqueued: {current_user.user_id} -> {target_user.user_id}")
+        
         # 응답 데이터 구성
         cat_image_url = f"/api/v1/cats/generate/{target_user.user_id}"
         return {
@@ -418,7 +427,16 @@ class UserService:
         if success:
             logger.info(f"✅ Friend request accepted: {user_id} <-> {friend_user_id}")
             
-            # FCM 푸시 알림 전송 (요청 보낸 사람에게)
+            # 친구 수락 이벤트 저장 (Push Worker가 FCM 전송)
+            from app.services.friend_event_service import friend_event_service
+            friend_event_service.enqueue_friend_accepted(
+                to_user_id=friend_user_id,  # 요청 보낸 사람에게 알림
+                from_user_id=user.user_id,
+                from_nickname=user.nickname
+            )
+            logger.info(f"✅ Friend accepted event enqueued: {user.user_id} -> {friend_user_id}")
+            
+            # FCM 푸시 알림 전송 (요청 보낸 사람에게) - 기존 코드 유지
             if friend_user.token:
                 try:
                     await fcm_service.send_friend_accepted_notification(
@@ -463,6 +481,15 @@ class UserService:
         success = await dynamodb_service.reject_friend_request(user_id, friend_user_id)
         if success:
             logger.info(f"Friend request rejected: {user_id} X {friend_user_id}")
+            
+            # 친구 거절 이벤트 저장 (선택적 - Push Worker가 FCM 전송)
+            from app.services.friend_event_service import friend_event_service
+            friend_event_service.enqueue_friend_rejected(
+                to_user_id=friend_user_id,  # 요청 보낸 사람에게 알림
+                from_user_id=user.user_id,
+                from_nickname=user.nickname
+            )
+            logger.info(f"✅ Friend rejected event enqueued: {user.user_id} -> {friend_user_id}")
         return success
     
     async def cancel_friend_request(self, user_id: str, friend_user_id: str) -> bool:

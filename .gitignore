@@ -95,6 +95,18 @@ insert_*_challenges.sql
 check_db.py
 create_challenge_tables.py
 
+# Test files
+test_*.py
+*_test.py
+test_*.sh
+test_*.ps1
+
+# Audio test files
+*.m4a
+*.mp3
+*.wav
+녹음*.m4a
+
 # AWS/Infrastructure (contains sensitive data)
 ec2-setup/
 deploy_ec2_with_s3.sh

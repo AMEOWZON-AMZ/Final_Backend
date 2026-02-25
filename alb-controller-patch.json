@@ -1,0 +1,29 @@
+[
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/volumeMounts/-",
+    "value": {
+      "mountPath": "/var/run/secrets/eks.amazonaws.com/serviceaccount",
+      "name": "aws-iam-token",
+      "readOnly": true
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/template/spec/volumes/-",
+    "value": {
+      "name": "aws-iam-token",
+      "projected": {
+        "sources": [
+          {
+            "serviceAccountToken": {
+              "audience": "sts.amazonaws.com",
+              "expirationSeconds": 86400,
+              "path": "token"
+            }
+          }
+        ]
+      }
+    }
+  }
+]

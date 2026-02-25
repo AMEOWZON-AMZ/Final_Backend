@@ -52,9 +52,10 @@ class S3Service:
         elif file_type.startswith("train_voice_"):
             return f"profiles/audio/train/{user_id}_{timestamp}_{unique_id}_{file_type}.{file_extension}"
         elif file_type == "challenge_image" and challenge_date:
-            # 챌린지 이미지는 날짜 기반 고정 파일명 (자동 덮어쓰기)
-            # 예: challenges/2026-02-14/a408ad9c-5011-70ef-006b-c93c46126c29.jpg
-            return f"challenges/{challenge_date}/{user_id}.jpg"
+            # 챌린지 이미지: 여러 장 제출 가능 (timestamp로 고유성 보장)
+            # 예: challenges/2026-02-14/a408ad9c_20260214_153045.jpg
+            timestamp_ms = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]  # millisecond 포함
+            return f"challenges/{challenge_date}/{user_id}_{timestamp_ms}.jpg"
         else:
             return f"uploads/{file_type}/{user_id}_{timestamp}_{unique_id}.{file_extension}"
     

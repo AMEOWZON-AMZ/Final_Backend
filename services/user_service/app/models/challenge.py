@@ -50,7 +50,7 @@ class ChallengeSubmission(Base):
     
     # 제약조건 및 인덱스
     __table_args__ = (
-        UniqueConstraint('user_id', 'challenge_day_id', name='ux_user_challenge'),
+        # UniqueConstraint 제거: 한 사용자가 같은 챌린지에 여러 장 제출 가능
         Index('idx_submission_day_user', 'challenge_day_id', 'user_id'),
         Index('idx_submission_user', 'user_id'),
         Index('idx_submissions_gps', 'latitude', 'longitude'),
