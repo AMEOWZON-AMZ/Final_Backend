@@ -4,4 +4,7 @@ python-multipart
 pillow
 torch
 open_clip_torch
-boto3
+transformers
+sqlalchemy
+psycopg2-binary
+pymysql
