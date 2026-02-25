@@ -1,7 +1,7 @@
 """
 챌린지 API 라우트
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional
@@ -13,7 +13,9 @@ from app.schemas.challenge import (
     ChallengeDayResponse,
     ChallengeDayDetailResponse,
     SubmissionResponse,
-    UserChallengeHistoryResponse
+    UserChallengeHistoryResponse,
+    ChallengeMapResponse,
+    FriendSubmissionInfo
 )
 import logging
 
@@ -78,25 +80,41 @@ async def submit_challenge(
     challenge_day_id: int,
     user_id: str = Form(...),
     image: UploadFile = File(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    altitude: Optional[float] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
     챌린지 사진 제출 (오늘 날짜만 가능)
     
+    Parameters:
     - challenge_day_id: 챌린지 ID
     - user_id: 사용자 ID (Form)
     - image: 이미지 파일 (File)
+    - latitude: 위도 (Form, 선택적) - 앱에서 직접 전송
+    - longitude: 경도 (Form, 선택적) - 앱에서 직접 전송
+    - altitude: 고도 (Form, 선택적) - 앱에서 직접 전송
     
     제약사항:
     - 오늘 날짜 챌린지만 제출 가능
     - 한 챌린지당 1회만 제출 가능
     - 이미지 파일만 허용
+    
+    GPS 우선순위:
+    1. 앱에서 전송한 위치 (latitude, longitude) - 가장 정확
+    2. 이미지 EXIF GPS - 백업용
+    3. GPS 없음 - 제출은 가능
     """
     try:
-        # 파일 정보 로깅 (디버깅용)
+        # 파일 정보 로깅
         logger.info(f"🔍 Submit challenge - challenge_id: {challenge_day_id}, user_id: {user_id}")
         logger.info(f"🔍 File - filename: {image.filename}, content_type: '{image.content_type}'")
-        logger.info(f"🔍 content_type repr: {repr(image.content_type)}, type: {type(image.content_type)}")
+        
+        # 앱에서 전송한 위치 확인
+        app_provided_gps = latitude is not None and longitude is not None
+        if app_provided_gps:
+            logger.info(f"📍 App provided GPS: lat={latitude}, lon={longitude}")
         
         # 챌린지 정보 조회 (날짜 확인용)
         from app.models.challenge import ChallengeDay
@@ -104,16 +122,32 @@ async def submit_challenge(
         if not challenge:
             raise HTTPException(status_code=404, detail="Challenge not found")
         
-        # S3에 이미지 업로드 (날짜 기반 경로)
+        # S3에 이미지 업로드 (EXIF GPS 추출 시도)
         challenge_date_str = challenge.challenge_date.strftime("%Y-%m-%d")
-        image_url = await s3_service.upload_challenge_image(image, user_id, challenge_date_str)
+        image_url, exif_gps_data = await s3_service.upload_challenge_image(image, user_id, challenge_date_str)
         
-        # DB에 제출 기록 저장
+        # GPS 데이터 결정 (우선순위: 앱 전송 > EXIF)
+        final_latitude = latitude if app_provided_gps else (exif_gps_data['latitude'] if exif_gps_data else None)
+        final_longitude = longitude if app_provided_gps else (exif_gps_data['longitude'] if exif_gps_data else None)
+        final_altitude = altitude if altitude is not None else (exif_gps_data.get('altitude') if exif_gps_data else None)
+        
+        # GPS 소스 로깅
+        if app_provided_gps:
+            logger.info(f"📍 Using app-provided GPS: lat={final_latitude}, lon={final_longitude}")
+        elif exif_gps_data:
+            logger.info(f"📍 Using EXIF GPS: lat={final_latitude}, lon={final_longitude}")
+        else:
+            logger.info(f"📍 No GPS data available")
+        
+        # DB에 제출 기록 저장 (GPS 포함)
         submission = challenge_service.submit_challenge(
             db=db,
             challenge_day_id=challenge_day_id,
             user_id=user_id,
-            image_url=image_url
+            image_url=image_url,
+            latitude=final_latitude,
+            longitude=final_longitude,
+            altitude=final_altitude
         )
         
         return submission
@@ -300,3 +334,87 @@ async def generate_next_month_challenges_api(
             status_code=500,
             detail=f"Failed to generate challenges: {str(e)}"
         )
+
+
+
+@router.get("/map", response_model=ChallengeMapResponse)
+async def get_challenge_map(
+    date: str = Query(..., description="Challenge date (YYYY-MM-DD)"),
+    user_id: Optional[str] = Query(None, description="User ID for friend filtering"),
+    db: Session = Depends(get_db)
+):
+    """
+    챌린지 지도 데이터 조회 (GPS 있는 제출만)
+    
+    - date: 챌린지 날짜 (YYYY-MM-DD)
+    - user_id: 사용자 ID (친구 필터링용, 선택적)
+    
+    Returns:
+        GPS 좌표가 있는 제출 목록 (지도 표시용)
+    """
+    try:
+        from datetime import date as date_type
+        challenge_date = date_type.fromisoformat(date)
+        
+        # 챌린지 정보 조회
+        from app.models.challenge import ChallengeDay
+        challenge = db.query(ChallengeDay).filter(
+            ChallengeDay.challenge_date == challenge_date
+        ).first()
+        
+        if not challenge:
+            raise HTTPException(status_code=404, detail="Challenge not found for this date")
+        
+        # 친구 목록 가져오기 (user_id가 있으면)
+        friend_ids = None
+        if user_id:
+            from app.services.dynamodb_service import dynamodb_service
+            friends = await dynamodb_service.get_accepted_friends(user_id)
+            friend_ids = [f['friend_user_id'] for f in friends]
+            friend_ids.append(user_id)  # 본인도 포함
+        
+        # GPS 있는 제출 조회
+        submissions = challenge_service.get_submissions_with_gps(
+            db=db,
+            challenge_date=challenge_date,
+            user_ids=friend_ids
+        )
+        
+        # 사용자 정보 조회 및 응답 생성
+        from app.services.user_service import UserService
+        user_service = UserService(db)
+        submission_infos = []
+        
+        for sub in submissions:
+            try:
+                user = await user_service.get_user_by_id(sub.user_id)
+                submission_infos.append(
+                    FriendSubmissionInfo(
+                        user_id=sub.user_id,
+                        nickname=user.nickname if user else "Unknown",
+                        image_url=sub.image_url,
+                        latitude=float(sub.latitude) if sub.latitude else None,
+                        longitude=float(sub.longitude) if sub.longitude else None,
+                        altitude=float(sub.altitude) if sub.altitude else None,
+                        has_gps=sub.has_gps,
+                        submitted_at=sub.created_at
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"Failed to get user info for {sub.user_id}: {e}")
+                continue
+        
+        return ChallengeMapResponse(
+            challenge_id=challenge.id,
+            title=challenge.title,
+            date=challenge.challenge_date,
+            submissions=submission_infos
+        )
+        
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get challenge map: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get challenge map")

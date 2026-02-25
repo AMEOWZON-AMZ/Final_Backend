@@ -225,6 +225,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(health_router, prefix="/health", tags=["health"])
 app.include_router(api_router, prefix="/api/v1")
 
+# Quick register router (QR code)
+from app.api.routes.quick_register import router as quick_register_router
+app.include_router(quick_register_router, prefix="/api/v1/quick", tags=["quick-register"])
+
 
 @app.get("/")
 async def root():

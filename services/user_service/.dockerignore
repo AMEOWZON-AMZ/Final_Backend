@@ -49,10 +49,28 @@ test_*.py
 *_test.py
 tests/
 .pytest_cache/
+test_*.wav
+test_*.html
+test.db
+test_output*/
+generated_cats/
 
 # Documentation
 *.md
 docs/
+
+# Migration and setup scripts
+*.sql
+check_*.py
+setup_*.py
+create_*.py
+analyze_*.py
+insert_*.py
+fix_*.py
+list_*.py
+run_*.py
+apply_*.py
+add_*.py
 
 # Git
 .git/

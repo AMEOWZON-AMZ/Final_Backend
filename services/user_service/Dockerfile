@@ -18,9 +18,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Production stage
 FROM python:3.11-slim
 
-# Install curl for health check
+# Install system dependencies (curl for health check, ffmpeg for audio processing)
 RUN apt-get update && apt-get install -y \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user for security

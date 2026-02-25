@@ -61,6 +61,7 @@ class UserService:
     
     async def create_user_from_signup(self, signup_data) -> User:
         """회원가입으로 사용자 생성 (Google/Cognito 전용)"""
+        from app.services.dynamodb_service import dynamodb_service
         
         # 중복 확인 (user_id, 이메일, 닉네임)
         existing_user = self.db.query(User).filter(
@@ -87,6 +88,8 @@ class UserService:
                 break
         
         # 사용자 생성 (user_id = Google/Cognito sub)
+        import json
+        
         new_user = User(
             user_id=signup_data.user_id,  # 프론트엔드에서 받은 Google/Cognito sub 사용
             email=signup_data.email,
@@ -98,8 +101,7 @@ class UserService:
             cat_color=signup_data.cat_color,
             # 음성 파일 정보
             meow_audio_url=signup_data.meow_audio_url,
-            duress_code=signup_data.duress_code,
-            duress_audio_url=signup_data.duress_audio_url if hasattr(signup_data, 'duress_audio_url') else None,
+            train_voice_urls=json.dumps(signup_data.train_voice_urls) if hasattr(signup_data, 'train_voice_urls') and signup_data.train_voice_urls else '[]',
             # 프로필 이미지
             profile_image_url=signup_data.profile_image_url if hasattr(signup_data, 'profile_image_url') else None,
             # FCM 토큰
@@ -112,6 +114,24 @@ class UserService:
             self.db.add(new_user)
             self.db.commit()
             self.db.refresh(new_user)
+            
+            # Self-Friend 레코드 생성 (본인 status 저장용)
+            import json
+            train_voice_urls = json.loads(new_user.train_voice_urls) if new_user.train_voice_urls else []
+            
+            profile_data = {
+                'email': new_user.email,
+                'nickname': new_user.nickname,
+                'profile_image_url': new_user.profile_image_url,
+                'cat_pattern': new_user.cat_pattern,
+                'cat_color': new_user.cat_color,
+                'meow_audio_url': new_user.meow_audio_url,
+                'train_voice_urls': train_voice_urls
+            }
+            
+            await dynamodb_service.create_self_friend_record(new_user.user_id, profile_data)
+            logger.info(f"✅ Self-friend 레코드 생성 완료: {new_user.user_id}")
+            
             return new_user
         except Exception as e:
             self.db.rollback()
@@ -120,7 +140,7 @@ class UserService:
     def _is_profile_complete(self, signup_data) -> bool:
         """프로필 완성도 체크"""
         has_cat_info = signup_data.cat_pattern and signup_data.cat_color
-        has_audio_info = signup_data.meow_audio_url or signup_data.duress_code
+        has_audio_info = signup_data.meow_audio_url or (hasattr(signup_data, 'train_voice_urls') and signup_data.train_voice_urls)
         return bool(has_cat_info and has_audio_info)
 
     async def get_lobby_friends(self, user_id: str) -> List[LobbyFriend]:
@@ -143,8 +163,7 @@ class UserService:
                 cat_pattern=friend_data.get('cat_pattern'),
                 cat_color=friend_data.get('cat_color'),
                 meow_audio_url=friend_data.get('meow_audio_url'),
-                duress_code=friend_data.get('duress_code'),
-                duress_audio_url=friend_data.get('duress_audio_url'),
+                train_voice_urls=friend_data.get('train_voice_urls', []),
                 daily_status=friend_data.get('daily_status'),
                 created_at_timestamp=friend_data.get('created_at', 0),
                 updated_at_timestamp=friend_data.get('updated_at', 0)
@@ -168,8 +187,9 @@ class UserService:
             user.cat_color = profile_data["cat_color"]
         if "meow_audio_url" in profile_data:
             user.meow_audio_url = profile_data["meow_audio_url"]
-        if "duress_audio_url" in profile_data:
-            user.duress_audio_url = profile_data["duress_audio_url"]
+        if "train_voice_urls" in profile_data:
+            import json
+            user.train_voice_urls = json.dumps(profile_data["train_voice_urls"]) if isinstance(profile_data["train_voice_urls"], list) else profile_data["train_voice_urls"]
         
         user.profile_setup_completed = True
         
@@ -198,8 +218,8 @@ class UserService:
             profile_image_url=user_data.profile_image_url,
             cat_pattern=user_data.cat_pattern,
             cat_color=user_data.cat_color,
-            duress_code=user_data.duress_code,
-            meow_audio_url=user_data.meow_audio_url
+            meow_audio_url=user_data.meow_audio_url,
+            train_voice_urls=json.dumps(user_data.train_voice_urls) if hasattr(user_data, 'train_voice_urls') and user_data.train_voice_urls else '[]'
         )
         
         self.db.add(db_user)
@@ -243,6 +263,9 @@ class UserService:
         self.db.refresh(db_user)
         
         # DynamoDB 친구 레코드 동기화 (비정규화된 프로필 정보 업데이트)
+        import json
+        train_voice_urls = json.loads(db_user.train_voice_urls) if db_user.train_voice_urls else []
+        
         profile_data = {
             'email': db_user.email,
             'nickname': db_user.nickname,
@@ -250,8 +273,7 @@ class UserService:
             'cat_pattern': db_user.cat_pattern,
             'cat_color': db_user.cat_color,
             'meow_audio_url': db_user.meow_audio_url,
-            'duress_code': db_user.duress_code,
-            'duress_audio_url': db_user.duress_audio_url
+            'train_voice_urls': train_voice_urls
         }
         
         try:
@@ -314,6 +336,10 @@ class UserService:
                 raise ValueError("Already friends with this user")
         
         # 현재 사용자 프로필 정보
+        import json
+        current_train_voice_urls = json.loads(current_user.train_voice_urls) if current_user.train_voice_urls else []
+        friend_train_voice_urls = json.loads(target_user.train_voice_urls) if target_user.train_voice_urls else []
+        
         current_profile = {
             'email': current_user.email,
             'nickname': current_user.nickname,
@@ -321,8 +347,7 @@ class UserService:
             'cat_pattern': current_user.cat_pattern,
             'cat_color': current_user.cat_color,
             'meow_audio_url': current_user.meow_audio_url,
-            'duress_code': current_user.duress_code,
-            'duress_audio_url': current_user.duress_audio_url,
+            'train_voice_urls': current_train_voice_urls,
             'daily_status': ''
         }
         
@@ -334,8 +359,7 @@ class UserService:
             'cat_pattern': target_user.cat_pattern,
             'cat_color': target_user.cat_color,
             'meow_audio_url': target_user.meow_audio_url,
-            'duress_code': target_user.duress_code,
-            'duress_audio_url': target_user.duress_audio_url,
+            'train_voice_urls': friend_train_voice_urls,
             'daily_status': ''
         }
         
@@ -364,8 +388,9 @@ class UserService:
         }
     
     async def accept_friend_request(self, user_id: str, friend_user_id: str) -> bool:
-        """친구 요청 수락 (pending → accepted)"""
+        """친구 요청 수락 (pending → accepted) + FCM 푸시 알림"""
         from app.services.dynamodb_service import dynamodb_service
+        from app.services.fcm_service import fcm_service
         
         # 사용자 존재 확인
         user = self.db.query(User).filter(User.user_id == user_id).first()
@@ -391,7 +416,22 @@ class UserService:
         # DynamoDB에서 친구 요청 수락
         success = await dynamodb_service.accept_friend_request(user_id, friend_user_id)
         if success:
-            logger.info(f"Friend request accepted: {user_id} <-> {friend_user_id}")
+            logger.info(f"✅ Friend request accepted: {user_id} <-> {friend_user_id}")
+            
+            # FCM 푸시 알림 전송 (요청 보낸 사람에게)
+            if friend_user.token:
+                try:
+                    await fcm_service.send_friend_accepted_notification(
+                        token=friend_user.token,
+                        accepter_nickname=user.nickname,
+                        accepter_user_id=user.user_id
+                    )
+                    logger.info(f"✅ FCM notification sent to {friend_user_id}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to send FCM notification: {e}")
+            else:
+                logger.warning(f"⚠️ No FCM token for user {friend_user_id}")
+        
         return success
     
     async def reject_friend_request(self, user_id: str, friend_user_id: str) -> bool:
@@ -526,8 +566,7 @@ class UserService:
                 'cat_pattern': data.get('cat_pattern'),
                 'cat_color': data.get('cat_color'),
                 'meow_audio_url': data.get('meow_audio_url'),
-                'duress_code': data.get('duress_code'),
-                'duress_audio_url': data.get('duress_audio_url'),
+                'train_voice_urls': data.get('train_voice_urls', []),
                 'daily_status': data.get('daily_status', ''),
                 'created_at': data.get('created_at', 0)
             }

@@ -36,6 +36,11 @@ spec:
         ports:
         - containerPort: 8000
           name: http
+        env:
+        - name: AWS_ROLE_ARN
+          value: "arn:aws:iam::715428147916:role/UserServicePodRole"
+        - name: AWS_WEB_IDENTITY_TOKEN_FILE
+          value: "/var/run/secrets/eks.amazonaws.com/serviceaccount/token"
         envFrom:
         - configMapRef:
             name: user-service-config
@@ -67,7 +72,18 @@ spec:
         volumeMounts:
         - name: data-volume
           mountPath: /app/data
+        - name: aws-iam-token
+          mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+          readOnly: true
       volumes:
       - name: data-volume
         emptyDir: {}
+      - name: aws-iam-token
+        projected:
+          defaultMode: 420
+          sources:
+          - serviceAccountToken:
+              audience: sts.amazonaws.com
+              expirationSeconds: 86400
+              path: token
       restartPolicy: Always

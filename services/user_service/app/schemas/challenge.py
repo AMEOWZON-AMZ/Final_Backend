@@ -56,6 +56,10 @@ class SubmissionResponse(BaseModel):
     challenge_day_id: int
     user_id: str
     image_url: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    altitude: Optional[float] = None
+    has_gps: bool = False
     created_at: datetime
 
 
@@ -79,6 +83,10 @@ class FriendSubmissionInfo(BaseModel):
     user_id: str
     nickname: str
     image_url: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    altitude: Optional[float] = None
+    has_gps: bool = False
     submitted_at: datetime
 
 
@@ -88,3 +96,11 @@ class ChallengeFriendsImagesResponse(BaseModel):
     date: date
     images: List[str]  # 이미지 URL 목록
     friends: List[FriendSubmissionInfo]  # 친구 상세 정보
+
+
+class ChallengeMapResponse(BaseModel):
+    """지도용 챌린지 응답"""
+    challenge_id: int
+    title: str
+    date: date
+    submissions: List[FriendSubmissionInfo]

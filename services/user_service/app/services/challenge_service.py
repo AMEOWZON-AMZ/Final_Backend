@@ -284,9 +284,12 @@ class ChallengeService:
         db: Session,
         challenge_day_id: int,
         user_id: str,
-        image_url: str
+        image_url: str,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        altitude: Optional[float] = None
     ) -> SubmissionResponse:
-        """챌린지 제출"""
+        """챌린지 제출 (GPS 좌표 포함)"""
         # 챌린지 존재 확인
         challenge = db.query(ChallengeDay).filter(
             ChallengeDay.id == challenge_day_id
@@ -303,6 +306,9 @@ class ChallengeService:
                 detail=f"Can only submit to today's challenge. Today (KST): {today_kst}, Challenge date: {challenge.challenge_date}"
             )
         
+        # GPS 정보 유무 확인
+        has_gps = latitude is not None and longitude is not None
+        
         # 이미 제출했는지 확인
         existing_submission = db.query(ChallengeSubmission).filter(
             ChallengeSubmission.challenge_day_id == challenge_day_id,
@@ -312,16 +318,24 @@ class ChallengeService:
         if existing_submission:
             # 덮어쓰기: 기존 제출 업데이트
             existing_submission.image_url = image_url
+            existing_submission.latitude = latitude
+            existing_submission.longitude = longitude
+            existing_submission.altitude = altitude
+            existing_submission.has_gps = has_gps
             existing_submission.created_at = datetime.now()
             db.commit()
             db.refresh(existing_submission)
             
-            logger.info(f"Challenge submission updated: {existing_submission.id}")
+            logger.info(f"Challenge submission updated: {existing_submission.id}, GPS: {has_gps}")
             return SubmissionResponse(
                 id=existing_submission.id,
                 challenge_day_id=existing_submission.challenge_day_id,
                 user_id=existing_submission.user_id,
                 image_url=existing_submission.image_url,
+                latitude=existing_submission.latitude,
+                longitude=existing_submission.longitude,
+                altitude=existing_submission.altitude,
+                has_gps=existing_submission.has_gps,
                 created_at=existing_submission.created_at
             )
         
@@ -329,19 +343,27 @@ class ChallengeService:
         new_submission = ChallengeSubmission(
             challenge_day_id=challenge_day_id,
             user_id=user_id,
-            image_url=image_url
+            image_url=image_url,
+            latitude=latitude,
+            longitude=longitude,
+            altitude=altitude,
+            has_gps=has_gps
         )
         
         db.add(new_submission)
         db.commit()
         db.refresh(new_submission)
         
-        logger.info(f"Challenge submission created: {new_submission.id}")
+        logger.info(f"Challenge submission created: {new_submission.id}, GPS: {has_gps}")
         return SubmissionResponse(
             id=new_submission.id,
             challenge_day_id=new_submission.challenge_day_id,
             user_id=new_submission.user_id,
             image_url=new_submission.image_url,
+            latitude=new_submission.latitude,
+            longitude=new_submission.longitude,
+            altitude=new_submission.altitude,
+            has_gps=new_submission.has_gps,
             created_at=new_submission.created_at
         )
     
@@ -384,6 +406,47 @@ class ChallengeService:
             total=total,
             submissions=history_list
         )
+
+
+    @staticmethod
+    def get_submissions_with_gps(
+        db: Session,
+        challenge_date: date,
+        user_ids: Optional[List[str]] = None
+    ) -> List[ChallengeSubmission]:
+        """
+        GPS 좌표가 있는 제출만 조회 (지도용)
+        
+        Args:
+            db: 데이터베이스 세션
+            challenge_date: 챌린지 날짜
+            user_ids: 필터링할 사용자 ID 목록 (친구 목록 등)
+        
+        Returns:
+            GPS 정보가 있는 제출 목록
+        """
+        # 챌린지 조회
+        challenge = db.query(ChallengeDay).filter(
+            ChallengeDay.challenge_date == challenge_date
+        ).first()
+        
+        if not challenge:
+            return []
+        
+        # GPS 있는 제출 조회
+        query = db.query(ChallengeSubmission).filter(
+            ChallengeSubmission.challenge_day_id == challenge.id,
+            ChallengeSubmission.has_gps == True
+        )
+        
+        # 특정 사용자들만 필터링 (친구 목록 등)
+        if user_ids:
+            query = query.filter(ChallengeSubmission.user_id.in_(user_ids))
+        
+        submissions = query.all()
+        
+        logger.info(f"Found {len(submissions)} submissions with GPS for date {challenge_date}")
+        return submissions
 
 
 # 전역 서비스 인스턴스

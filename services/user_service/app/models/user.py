@@ -49,9 +49,8 @@ class User(Base):
     # 고양이 프로필
     cat_pattern = Column(String(50), nullable=True)  # 문자열로 변경 (DB에 소문자 데이터 존재)
     cat_color = Column(String(7), nullable=True)
-    duress_code = Column(String(100), nullable=True)
     meow_audio_url = Column(String(500), nullable=True)
-    duress_audio_url = Column(String(500), nullable=True)
+    train_voice_urls = Column(String(2000), nullable=True)  # JSON 배열 형식 ["url1", "url2", "url3"]
     
     # FCM 푸시 알림
     token = Column(String(500), nullable=True)  # Firebase Cloud Messaging 토큰

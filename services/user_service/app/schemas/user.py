@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, field_validator
 from typing import Optional, List
 from datetime import datetime
+import json
 
 
 class UserBase(BaseModel):
@@ -14,8 +15,8 @@ class UserCreate(UserBase):
     # 프론트엔드 호환 필드들
     cat_pattern: Optional[str] = None
     cat_color: Optional[str] = None
-    duress_code: Optional[str] = None
     meow_audio_url: Optional[str] = None
+    train_voice_urls: Optional[list[str]] = None
 
 
 class UserUpdate(BaseModel):
@@ -27,8 +28,8 @@ class UserUpdate(BaseModel):
     # 프론트엔드 호환 필드들
     cat_pattern: Optional[str] = None
     cat_color: Optional[str] = None
-    duress_code: Optional[str] = None
     meow_audio_url: Optional[str] = None
+    train_voice_urls: Optional[list[str]] = None
     
     def model_dump(self, **kwargs):
         """full_name을 nickname으로 변환"""
@@ -54,8 +55,7 @@ class UserSignup(BaseModel):
     
     # 음성 파일 정보 (선택)
     meow_audio_url: Optional[str] = None  # 야옹 소리
-    duress_code: Optional[str] = None  # 위험 신호 코드
-    duress_audio_url: Optional[str] = None  # 위험 신호 소리
+    train_voice_urls: Optional[list[str]] = None  # 암구호 학습용 음성 배열
     
     # 프로필 이미지 (선택)
     profile_image_url: Optional[str] = None
@@ -82,8 +82,11 @@ class UserSignup(BaseModel):
                 "cat_pattern": "solid",
                 "cat_color": "#FF6B6B",
                 "meow_audio_url": "https://s3.amazonaws.com/bucket/meow.mp3",
-                "duress_code": "HELP123",
-                "duress_audio_url": "https://s3.amazonaws.com/bucket/duress.mp3",
+                "train_voice_urls": [
+                    "https://s3.amazonaws.com/bucket/train1.mp3",
+                    "https://s3.amazonaws.com/bucket/train2.mp3",
+                    "https://s3.amazonaws.com/bucket/train3.mp3"
+                ],
                 "profile_image_url": "https://s3.amazonaws.com/bucket/profile.jpg",
                 "token": "fcm_token_from_firebase..."
             }
@@ -102,14 +105,26 @@ class UserResponse(UserBase):
     nickname: Optional[str] = None
     cat_pattern: Optional[str] = None
     cat_color: Optional[str] = None
-    duress_code: Optional[str] = None
     meow_audio_url: Optional[str] = None
-    duress_audio_url: Optional[str] = None
+    train_voice_urls: Optional[list[str]] = None
+    # FCM 토큰
+    token: Optional[str] = None  # Firebase Cloud Messaging 토큰
     # 프론트엔드 타임스탬프
     created_at_timestamp: Optional[int] = None
     updated_at_timestamp: Optional[int] = None
     # 백엔드 전용
     profile_setup_completed: bool = False
+    
+    @field_validator('train_voice_urls', mode='before')
+    @classmethod
+    def parse_train_voice_urls(cls, v):
+        """JSON 문자열을 리스트로 변환"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v) if v else []
+            except:
+                return []
+        return v if v else []
 
 
 class UserProfile(BaseModel):
@@ -124,8 +139,12 @@ class UserProfile(BaseModel):
     # 프론트엔드 호환 필드들
     cat_pattern: Optional[str] = None
     cat_color: Optional[str] = None
-    duress_code: Optional[str] = None
     meow_audio_url: Optional[str] = None
+    train_voice_urls: Optional[list[str]] = None
+    # FCM 토큰
+    token: Optional[str] = None  # Firebase Cloud Messaging 토큰
+    # 본인 일일 상태
+    daily_status: Optional[str] = None  # 본인의 일일 상태 (AI 추론)
     created_at_timestamp: Optional[int] = None
     updated_at_timestamp: Optional[int] = None
 
@@ -156,11 +175,21 @@ class LobbyFriend(BaseModel):
     cat_pattern: Optional[str] = None  # 고양이 패턴
     cat_color: Optional[str] = None  # 고양이 색상
     meow_audio_url: Optional[str] = None  # 야옹 소리 URL
-    duress_code: Optional[str] = None  # 위험 신호 코드
-    duress_audio_url: Optional[str] = None  # 위험 신호 소리 URL
+    train_voice_urls: Optional[list[str]] = None  # 암구호 학습용 음성 URL 배열
     daily_status: Optional[str] = None  # 일일 상태 (AI 추론)
     created_at_timestamp: Optional[int] = None  # 생성 시간
     updated_at_timestamp: Optional[int] = None  # 수정 시간
+    
+    @field_validator('train_voice_urls', mode='before')
+    @classmethod
+    def parse_train_voice_urls(cls, v):
+        """JSON 문자열 또는 리스트를 리스트로 변환"""
+        if isinstance(v, str):
+            try:
+                return json.loads(v) if v else []
+            except:
+                return []
+        return v if v else []
 
 
 class LoginResponse(BaseModel):
@@ -217,8 +246,8 @@ class FrontendUser(BaseModel):
     updated_at_timestamp: int  # updatedAt
     cat_pattern: Optional[str] = None  # catPattern
     cat_color: Optional[str] = None  # catColor
-    duress_code: Optional[str] = None  # duressCode
     meow_audio_url: Optional[str] = None  # meowAudioUrl
+    train_voice_urls: Optional[list[str]] = None  # trainVoiceUrls
 
 
 # 친구 관련 스키마

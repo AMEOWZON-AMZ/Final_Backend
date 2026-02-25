@@ -58,13 +58,18 @@ async def login_and_get_lobby(
 
         # 2. FCM 토큰 업데이트 (제공된 경우)
         if login_data.token:
-            await user_service.update_fcm_token(user.user_id, login_data.token)
+            user = await user_service.update_fcm_token(user.user_id, login_data.token)
             logger.info(f"✅ FCM Token updated for user: {user.user_id}")
 
-        # 3. 로비용 친구 목록 조회
+        # 3. 본인 daily_status 조회 (DynamoDB)
+        from app.services.dynamodb_service import dynamodb_service
+        my_daily_status = await dynamodb_service.get_my_daily_status(user.user_id)
+        logger.info(f"📊 본인 daily_status: {my_daily_status}")
+
+        # 4. 로비용 친구 목록 조회
         lobby_friends = await user_service.get_lobby_friends(user.user_id)
 
-        # 4. 사용자 프로필 정보
+        # 5. 사용자 프로필 정보 (본인 daily_status 포함)
         user_profile = UserProfile(
             user_id=user.user_id,
             email=user.email,
@@ -75,13 +80,14 @@ async def login_and_get_lobby(
             friend_code=user.friend_code,
             cat_pattern=user.cat_pattern,
             cat_color=user.cat_color,
-            duress_code=user.duress_code,
             meow_audio_url=user.meow_audio_url,
+            token=user.token,  # FCM 토큰 추가
+            daily_status=my_daily_status or "",  # 본인 daily_status 추가
             created_at_timestamp=user.created_at_timestamp,
             updated_at_timestamp=user.updated_at_timestamp
         )
 
-        # 5. 통합 응답
+        # 6. 통합 응답
         login_response = LoginResponse(
             user=user_profile,
             friends=lobby_friends,
@@ -143,12 +149,11 @@ async def signup(
             phone_number = form.get("phone_number")  # 전화번호 추가
             cat_pattern = form.get("cat_pattern")
             cat_color = form.get("cat_color")
-            duress_code = form.get("duress_code")
             token = form.get("token")
             
             profile_image = form.get("profile_image")
             meow_audio = form.get("meow_audio")
-            duress_audio = form.get("duress_audio")
+            train_voice = form.getlist("train_voice")  # 배열로 받기
             
             logger.info(f"📝 User: {user_id}, {email}, {nickname}, {phone_number}")
             logger.info(f"🎨 Cat: {cat_pattern}, {cat_color}")
@@ -156,7 +161,7 @@ async def signup(
             # 파일 업로드 처리
             profile_image_url = None
             meow_audio_url = None
-            duress_audio_url = None
+            train_voice_urls = []
             
             if profile_image and hasattr(profile_image, 'filename'):
                 logger.info(f"📤 Uploading profile image: {profile_image.filename}")
@@ -168,10 +173,17 @@ async def signup(
                 meow_audio_url = await s3_service.upload_meow_audio(meow_audio, user_id)
                 logger.info(f"✅ Uploaded: {meow_audio_url}")
             
-            if duress_audio and hasattr(duress_audio, 'filename'):
-                logger.info(f"📤 Uploading duress audio: {duress_audio.filename}")
-                duress_audio_url = await s3_service.upload_duress_audio(duress_audio, user_id)
-                logger.info(f"✅ Uploaded: {duress_audio_url}")
+            if train_voice:
+                # 3개의 암구호 파일 업로드
+                for idx, voice_file in enumerate(train_voice[:3], 1):  # 최대 3개만
+                    if hasattr(voice_file, 'filename'):
+                        try:
+                            logger.info(f"📤 Uploading train voice {idx}: {voice_file.filename}")
+                            voice_url = await s3_service.upload_train_voice(voice_file, user_id, idx)
+                            train_voice_urls.append(voice_url)
+                            logger.info(f"✅ Uploaded: {voice_url}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to upload train voice {idx}: {e}")
             
             # UserSignup 스키마 생성
             signup_data = UserSignup(
@@ -183,8 +195,7 @@ async def signup(
                 cat_color=cat_color,
                 profile_image_url=profile_image_url,
                 meow_audio_url=meow_audio_url,
-                duress_audio_url=duress_audio_url,
-                duress_code=duress_code,
+                train_voice_urls=train_voice_urls,
                 token=token
             )
             
@@ -241,8 +252,7 @@ async def signup_multipart(
     cat_color: str = Form(...),
     profile_image: UploadFile = File(None),
     meow_audio: UploadFile = File(None),
-    duress_audio: UploadFile = File(None),
-    duress_code: Optional[str] = Form(None),
+    train_voice: Optional[list[UploadFile]] = File(None),  # 3개의 암구호 녹음 파일
     token: Optional[str] = Form(None),
     db: Session = Depends(get_db)
 ):
@@ -261,8 +271,7 @@ async def signup_multipart(
     선택 필드:
     - profile_image: 프로필 이미지 파일
     - meow_audio: 야옹 소리 파일
-    - duress_audio: 위험 신호 소리 파일
-    - duress_code: 위험 신호 코드
+    - train_voice: 암구호 학습용 음성 파일 3개 (배열)
     - token: FCM 토큰 (푸시 알림용)
     """
     # 요청 로깅
@@ -274,8 +283,8 @@ async def signup_multipart(
         logger.info(f"🖼️ Profile image: {profile_image.filename}")
     if meow_audio:
         logger.info(f"🐱 Meow audio: {meow_audio.filename}")
-    if duress_audio:
-        logger.info(f"🚨 Duress audio: {duress_audio.filename}")
+    if train_voice:
+        logger.info(f"🎤 Train voice files: {len(train_voice)} files")
     
     try:
         user_service = UserService(db)
@@ -283,7 +292,7 @@ async def signup_multipart(
         # 파일 업로드 처리
         profile_image_url = None
         meow_audio_url = None
-        duress_audio_url = None
+        train_voice_urls = []
         
         if profile_image:
             logger.info(f"📤 Uploading profile image to S3...")
@@ -295,10 +304,16 @@ async def signup_multipart(
             meow_audio_url = await s3_service.upload_meow_audio(meow_audio, user_id)
             logger.info(f"✅ Meow audio uploaded: {meow_audio_url}")
         
-        if duress_audio:
-            logger.info(f"📤 Uploading duress audio to S3...")
-            duress_audio_url = await s3_service.upload_duress_audio(duress_audio, user_id)
-            logger.info(f"✅ Duress audio uploaded: {duress_audio_url}")
+        if train_voice:
+            # 3개의 암구호 파일 업로드
+            for idx, voice_file in enumerate(train_voice[:3], 1):  # 최대 3개만
+                try:
+                    logger.info(f"📤 Uploading train voice {idx} to S3...")
+                    voice_url = await s3_service.upload_train_voice(voice_file, user_id, idx)
+                    train_voice_urls.append(voice_url)
+                    logger.info(f"✅ Train voice {idx} uploaded: {voice_url}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to upload train voice {idx}: {e}")
         
         # UserSignup 스키마 생성
         signup_data = UserSignup(
@@ -310,8 +325,7 @@ async def signup_multipart(
             cat_color=cat_color,
             profile_image_url=profile_image_url,
             meow_audio_url=meow_audio_url,
-            duress_audio_url=duress_audio_url,
-            duress_code=duress_code,
+            train_voice_urls=train_voice_urls,
             token=token
         )
         
@@ -431,8 +445,8 @@ async def get_my_profile(
         friend_code=user.friend_code,
         cat_pattern=user.cat_pattern,
         cat_color=user.cat_color,
-        duress_code=user.duress_code,
         meow_audio_url=user.meow_audio_url,
+        token=user.token,  # FCM 토큰 추가
         created_at_timestamp=user.created_at_timestamp,
         updated_at_timestamp=user.updated_at_timestamp
     )
@@ -480,18 +494,17 @@ async def update_my_profile(
             phone_number = form.get("phone_number")  # 전화번호 추가
             cat_pattern = form.get("cat_pattern")
             cat_color = form.get("cat_color")
-            duress_code = form.get("duress_code")
             
             profile_image = form.get("profile_image")
             meow_audio = form.get("meow_audio")
-            duress_audio = form.get("duress_audio")
+            train_voice = form.getlist("train_voice")  # 배열로 받기
             
             logger.info(f"📝 Update fields: email={email}, nickname={nickname}, full_name={full_name}, phone={phone_number}")
             
             # 파일 업로드 처리
             profile_image_url = None
             meow_audio_url = None
-            duress_audio_url = None
+            train_voice_urls = []
             
             if profile_image and hasattr(profile_image, 'filename'):
                 logger.info(f"📤 Uploading profile image: {profile_image.filename}")
@@ -503,10 +516,17 @@ async def update_my_profile(
                 meow_audio_url = await s3_service.upload_meow_audio(meow_audio, user_id)
                 logger.info(f"✅ Uploaded: {meow_audio_url}")
             
-            if duress_audio and hasattr(duress_audio, 'filename'):
-                logger.info(f"📤 Uploading duress audio: {duress_audio.filename}")
-                duress_audio_url = await s3_service.upload_duress_audio(duress_audio, user_id)
-                logger.info(f"✅ Uploaded: {duress_audio_url}")
+            if train_voice:
+                # 3개의 암구호 파일 업로드
+                for idx, voice_file in enumerate(train_voice[:3], 1):  # 최대 3개만
+                    if hasattr(voice_file, 'filename'):
+                        try:
+                            logger.info(f"📤 Uploading train voice {idx}: {voice_file.filename}")
+                            voice_url = await s3_service.upload_train_voice(voice_file, user_id, idx)
+                            train_voice_urls.append(voice_url)
+                            logger.info(f"✅ Uploaded: {voice_url}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to upload train voice {idx}: {e}")
             
             # UserUpdate 스키마 생성
             profile_data = UserUpdate(
@@ -516,9 +536,9 @@ async def update_my_profile(
                 phone_number=phone_number,  # 전화번호 추가
                 cat_pattern=cat_pattern,
                 cat_color=cat_color,
-                duress_code=duress_code,
                 profile_image_url=profile_image_url,
-                meow_audio_url=meow_audio_url
+                meow_audio_url=meow_audio_url,
+                train_voice_urls=train_voice_urls if train_voice_urls else None
             )
             
         else:
@@ -727,3 +747,136 @@ async def get_user_phone_number(
         message="Phone number retrieved successfully"
     )
 
+
+
+@router.post("/fcm-token/{user_id}", response_model=dict)
+async def update_fcm_token(
+    user_id: str,
+    token: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    FCM 토큰 업데이트
+    
+    Parameters:
+    - user_id: 사용자 ID
+    - token: Firebase Cloud Messaging 토큰
+    
+    Returns:
+    - user_id: 사용자 ID
+    - token: 업데이트된 FCM 토큰
+    
+    예시:
+    - POST /api/v1/users/fcm-token/c478cd4c-5071-7060-2991-cc9b3bb59dff
+    - Body: token=dGhpc19pc19hX3Rlc3RfdG9rZW4...
+    """
+    logger.info(f"🔥 UPDATE_FCM_TOKEN REQUEST: user_id={user_id}")
+    logger.info(f"📱 Token (first 20 chars): {token[:20]}...")
+    
+    user_service = UserService(db)
+    user = await user_service.update_fcm_token(user_id, token)
+    
+    if not user:
+        logger.error(f"❌ User not found: user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+        )
+    
+    logger.info(f"✅ FCM token updated: user_id={user_id}")
+    
+    return success_response(
+        data={
+            "user_id": user.user_id,
+            "token": user.token
+        },
+        message="FCM token updated successfully"
+    )
+
+
+@router.post("/status/{user_id}", response_model=dict)
+async def update_my_status(
+    user_id: str,
+    status: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    본인의 일일 상태 업데이트
+    
+    Parameters:
+    - user_id: 사용자 ID
+    - status: 상태 메시지
+    
+    예시:
+    - POST /api/v1/users/status/user123
+    - Body: status=오늘 기분이 좋아요!
+    """
+    logger.info(f"🔥 UPDATE_STATUS REQUEST: user_id={user_id}, status={status}")
+    
+    from app.services.dynamodb_service import dynamodb_service
+    
+    # 사용자 존재 확인
+    user_service = UserService(db)
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        logger.error(f"❌ User not found: user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+        )
+    
+    # Status 업데이트
+    success = await dynamodb_service.update_my_daily_status(user_id, status)
+    
+    if not success:
+        logger.error(f"❌ Status update failed: user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error_response(message="Failed to update status", error_code="STATUS_UPDATE_ERROR")
+        )
+    
+    logger.info(f"✅ Status updated: user_id={user_id}")
+    
+    return success_response(
+        data={"user_id": user_id, "daily_status": status},
+        message="Status updated successfully"
+    )
+
+
+@router.get("/status/{user_id}", response_model=dict)
+async def get_my_status(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    본인의 일일 상태 조회
+    
+    Parameters:
+    - user_id: 사용자 ID
+    
+    예시:
+    - GET /api/v1/users/status/user123
+    """
+    logger.info(f"🔥 GET_STATUS REQUEST: user_id={user_id}")
+    
+    from app.services.dynamodb_service import dynamodb_service
+    
+    # 사용자 존재 확인
+    user_service = UserService(db)
+    user = await user_service.get_user_by_id(user_id)
+    if not user:
+        logger.error(f"❌ User not found: user_id={user_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
+        )
+    
+    # Status 조회
+    daily_status = await dynamodb_service.get_my_daily_status(user_id)
+    
+    logger.info(f"✅ Status retrieved: user_id={user_id}, status={daily_status}")
+    
+    return success_response(
+        data={"user_id": user_id, "daily_status": daily_status or ""},
+        message="Status retrieved successfully"
+    )

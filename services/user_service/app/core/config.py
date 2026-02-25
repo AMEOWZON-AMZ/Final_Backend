@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
-from typing import List
+from typing import List, Optional
 import os
 
 
@@ -67,6 +67,19 @@ class Settings(BaseSettings):
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/webp"]
     ALLOWED_AUDIO_TYPES: List[str] = ["audio/mpeg", "audio/wav", "audio/mp4", "audio/x-m4a", "audio/m4a"]
+    
+    # Gemini API (챌린지 자동 생성용)
+    GEMINI_API_KEY: Optional[str] = None
+    
+    # Hugging Face API (이미지 생성용)
+    HUGGINGFACE_TOKEN: Optional[str] = None
+    
+    # Replicate API (이미지 생성용 - 확실하게 작동!)
+    REPLICATE_TOKEN: Optional[str] = None
+    
+    # Nanobanana API (AI 이미지 생성용)
+    NANOBANANA_API_URL: Optional[str] = None
+    NANOBANANA_API_KEY: Optional[str] = None
     
     # CORS settings
     ALLOWED_ORIGINS: List[str] = ["*"]

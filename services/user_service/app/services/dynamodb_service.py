@@ -1,4 +1,4 @@
-"""
+﻿"""
 DynamoDB 서비스 - 사용자 프로필 + 친구 관계 관리
 user_friends 테이블: 본인 프로필 정보 + 친구 ID 목록
 """
@@ -102,6 +102,7 @@ class DynamoDBService:
         """
         로비 친구 목록 조회 (한 번의 쿼리로 모든 정보 조회)
         친구 관계 레코드에 친구의 모든 프로필 정보가 비정규화되어 저장됨
+        자기 자신(self-friend)은 제외
         
         Returns:
             친구 목록 (각 친구의 모든 프로필 정보 포함)
@@ -113,7 +114,7 @@ class DynamoDBService:
         try:
             response = self.friends_table.query(
                 KeyConditionExpression='user_id = :user_id',
-                FilterExpression='#status = :status',
+                FilterExpression='#status = :status AND friend_user_id <> :user_id',  # 자기 자신 제외
                 ExpressionAttributeNames={'#status': 'status'},
                 ExpressionAttributeValues={
                     ':user_id': user_id,
@@ -195,8 +196,7 @@ class DynamoDBService:
                     'cat_pattern': friend_profile.get('cat_pattern', ''),
                     'cat_color': friend_profile.get('cat_color', ''),
                     'meow_audio_url': friend_profile.get('meow_audio_url', ''),
-                    'duress_code': friend_profile.get('duress_code', ''),
-                    'duress_audio_url': friend_profile.get('duress_audio_url', ''),
+                    'train_voice_urls': friend_profile.get('train_voice_urls', []),
                     'daily_status': friend_profile.get('daily_status', ''),
                     # 관계 정보
                     'status': 'sending',
@@ -217,8 +217,7 @@ class DynamoDBService:
                     'cat_pattern': current_user_profile.get('cat_pattern', ''),
                     'cat_color': current_user_profile.get('cat_color', ''),
                     'meow_audio_url': current_user_profile.get('meow_audio_url', ''),
-                    'duress_code': current_user_profile.get('duress_code', ''),
-                    'duress_audio_url': current_user_profile.get('duress_audio_url', ''),
+                    'train_voice_urls': current_user_profile.get('train_voice_urls', []),
                     'daily_status': current_user_profile.get('daily_status', ''),
                     # 관계 정보
                     'status': 'pending',
@@ -480,12 +479,9 @@ class DynamoDBService:
             if 'meow_audio_url' in profile_data:
                 update_parts.append('meow_audio_url = :meow_audio_url')
                 expr_values[':meow_audio_url'] = profile_data['meow_audio_url']
-            if 'duress_code' in profile_data:
-                update_parts.append('duress_code = :duress_code')
-                expr_values[':duress_code'] = profile_data['duress_code']
-            if 'duress_audio_url' in profile_data:
-                update_parts.append('duress_audio_url = :duress_audio_url')
-                expr_values[':duress_audio_url'] = profile_data['duress_audio_url']
+            if 'train_voice_urls' in profile_data:
+                update_parts.append('train_voice_urls = :train_voice_urls')
+                expr_values[':train_voice_urls'] = profile_data['train_voice_urls']
             
             if not update_parts:
                 logger.warning("업데이트할 프로필 정보 없음")
@@ -607,6 +603,121 @@ class DynamoDBService:
         except ClientError as e:
             logger.error(f"❌ 친구 목록 조회 실패: {e}")
             return []
+    
+    async def create_self_friend_record(self, user_id: str, profile_data: Dict[str, Any]) -> bool:
+        """
+        자기 자신을 친구로 추가 (본인 status 저장용)
+        
+        Args:
+            user_id: 사용자 ID
+            profile_data: 사용자 프로필 정보
+        
+        Returns:
+            성공 여부
+        """
+        if not self.dynamodb or not self.friends_table:
+            logger.error("DynamoDB 연결 없음")
+            return False
+        
+        try:
+            timestamp = int(datetime.now().timestamp() * 1000)
+            
+            self.friends_table.put_item(
+                Item={
+                    'user_id': user_id,
+                    'friend_user_id': user_id,  # 자기 자신
+                    'status': 'self',  # 특별한 상태
+                    'daily_status': '',  # 초기값
+                    'email': profile_data.get('email', ''),
+                    'nickname': profile_data.get('nickname', ''),
+                    'profile_image_url': profile_data.get('profile_image_url', ''),
+                    'cat_pattern': profile_data.get('cat_pattern', ''),
+                    'cat_color': profile_data.get('cat_color', ''),
+                    'meow_audio_url': profile_data.get('meow_audio_url', ''),
+                    'train_voice_urls': profile_data.get('train_voice_urls', []),
+                    'created_at': timestamp,
+                    'updated_at': timestamp
+                }
+            )
+            
+            logger.info(f"✅ Self-friend 레코드 생성: {user_id}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"❌ Self-friend 레코드 생성 실패: {e}")
+            return False
+    
+    async def update_my_daily_status(self, user_id: str, daily_status: str) -> bool:
+        """
+        본인의 일일 상태 업데이트
+        
+        Args:
+            user_id: 사용자 ID
+            daily_status: 상태 메시지
+        
+        Returns:
+            성공 여부
+        """
+        if not self.dynamodb or not self.friends_table:
+            logger.error("DynamoDB 연결 없음")
+            return False
+        
+        try:
+            timestamp = int(datetime.now().timestamp() * 1000)
+            
+            self.friends_table.update_item(
+                Key={
+                    'user_id': user_id,
+                    'friend_user_id': user_id  # 자기 자신
+                },
+                UpdateExpression='SET daily_status = :status, updated_at = :timestamp',
+                ExpressionAttributeValues={
+                    ':status': daily_status,
+                    ':timestamp': timestamp
+                }
+            )
+            
+            logger.info(f"✅ 본인 status 업데이트: {user_id} - {daily_status}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"❌ 본인 status 업데이트 실패: {e}")
+            return False
+    
+    async def get_my_daily_status(self, user_id: str) -> Optional[str]:
+        """
+        본인의 일일 상태 조회
+        
+        Args:
+            user_id: 사용자 ID
+        
+        Returns:
+            상태 메시지 또는 None
+        """
+        if not self.dynamodb or not self.friends_table:
+            logger.error("DynamoDB 연결 없음")
+            return None
+        
+        try:
+            response = self.friends_table.get_item(
+                Key={
+                    'user_id': user_id,
+                    'friend_user_id': user_id
+                }
+            )
+            
+            item = response.get('Item')
+            if item:
+                daily_status = item.get('daily_status', '')
+                logger.info(f"✅ 본인 status 조회: {user_id} - {daily_status}")
+                return daily_status
+            else:
+                logger.warning(f"⚠️ Self-friend 레코드 없음: {user_id}")
+                return None
+            
+        except ClientError as e:
+            logger.error(f"❌ 본인 status 조회 실패: {e}")
+            return None
 
 
 # 전역 DynamoDB 서비스 인스턴스
