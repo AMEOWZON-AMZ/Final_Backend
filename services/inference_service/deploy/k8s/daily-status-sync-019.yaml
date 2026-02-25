@@ -1,0 +1,44 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: daily-status-sync-manual-019
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      serviceAccountName: inference-service-sa
+      restartPolicy: OnFailure
+      containers:
+        - name: daily-status-sync
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/inference-service:1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AWS_STS_REGIONAL_ENDPOINTS
+              value: regional
+            - name: AWS_DEFAULT_REGION
+              value: ap-northeast-2
+            - name: AWS_REGION
+              value: ap-northeast-2
+            - name: AWS_ROLE_ARN
+              value: arn:aws:iam::715428147916:role/msg-service-irsa-role
+            - name: AWS_WEB_IDENTITY_TOKEN_FILE
+              value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
+          envFrom:
+            - configMapRef:
+                name: inference-config
+          volumeMounts:
+            - name: aws-iam-token
+              mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+              readOnly: true
+          command: ["python", "-c"]
+          args:
+            - "from services.inference_service.app.services.inference_event_service import InferenceEventService; print(InferenceEventService().sync_daily_status_from_s3(target_date='2026-02-19'))"
+      volumes:
+        - name: aws-iam-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: sts.amazonaws.com
+                  expirationSeconds: 86400
+                  path: token
