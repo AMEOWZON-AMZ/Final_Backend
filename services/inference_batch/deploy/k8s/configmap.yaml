@@ -1,0 +1,11 @@
+﻿apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inference-batch-config
+  namespace: default
+data:
+  S3_SILVER_URI: "s3://ameowzon-silver/events/"
+  S3_DAILY_FEATURE_URI: "s3://nyang-ml-apne2-dev/ml/daily-feature/"
+  S3_BASELINE_URI: "s3://nyang-ml-apne2-dev/ml/baseline/"
+  MODEL_URI: "s3://nyang-ml-apne2-dev/ml/artifacts/models/isolation_forest.pkl"
+  S3_OUTPUT_URI: "s3://nyang-ml-apne2-dev/ml/outputs/"

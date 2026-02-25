@@ -1,0 +1,30 @@
+﻿# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtual envs
+.venv/
+venv/
+
+# VCS and editor
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Secrets/env
+.env
+.env.*
+
+# Logs and docs not needed in image
+*.log
+docs/
+deploy/
+
+# Keep build context small
+__pycache__/
