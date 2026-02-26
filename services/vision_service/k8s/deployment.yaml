@@ -15,7 +15,7 @@ spec:
       serviceAccountName: vision-validate-sa
       containers:
         - name: vision-validate
-          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/vision-validate:0.1
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/vision-validate:0.4
           ports:
             - containerPort: 8080
           env:

@@ -49,4 +49,4 @@ class ClipService:
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             sims = (image_features @ text_features.T).squeeze(0)
-        return float(sims.mean().item())
+        return float(sims.max().item())

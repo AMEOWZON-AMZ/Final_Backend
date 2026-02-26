@@ -13,11 +13,30 @@ spec:
         app: msg-service
     spec:
       serviceAccountName: msg-service-sa
+      volumes:
+        - name: aws-iam-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: sts.amazonaws.com
+                  expirationSeconds: 86400
+                  path: token
       containers:
         - name: msg-service
-          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/msg-service:0.8
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/msg-service:0.11
           ports:
             - containerPort: 8080
+          env:
+            - name: AWS_ROLE_ARN
+              value: arn:aws:iam::715428147916:role/msg-service-irsa-role
+            - name: AWS_WEB_IDENTITY_TOKEN_FILE
+              value: /var/run/secrets/eks.amazonaws.com/serviceaccount/token
+            - name: AWS_STS_REGIONAL_ENDPOINTS
+              value: regional
+          volumeMounts:
+            - name: aws-iam-token
+              mountPath: /var/run/secrets/eks.amazonaws.com/serviceaccount
+              readOnly: true
           envFrom:
             - secretRef:
                 name: msg-secret

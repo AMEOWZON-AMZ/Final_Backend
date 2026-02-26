@@ -4,7 +4,7 @@ python-multipart
 pillow
 torch
 open_clip_torch
-transformers
+transformers<5
 sqlalchemy
 psycopg2-binary
 pymysql
