@@ -15,7 +15,7 @@ spec:
       serviceAccountName: vision-validate-sa
       containers:
         - name: vision-validate
-          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/vision-validate:0.4
+          image: 715428147916.dkr.ecr.ap-northeast-2.amazonaws.com/vision-validate:0.5
           ports:
             - containerPort: 8080
           env:
@@ -26,7 +26,7 @@ spec:
             - name: MAX_BYTES
               value: "10485760"
             - name: SCORE_THRESHOLD
-              value: "0.22"
+              value: "0.05"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
