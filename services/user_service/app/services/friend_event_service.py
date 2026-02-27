@@ -69,11 +69,20 @@ class FriendEventService:
                 "sk": "EVENT",
                 "event_id": event_id,
                 "event_type": event_type,
-                "to_user_id": to_user_id,
-                "from_user_id": from_user_id,
-                "from_nickname": from_nickname,
+                "status": "PENDING",
+                "attempt_count": 0,
+                "next_retry_at": created_at,
                 "created_at": created_at,
-                "status": "pending"
+                "payload": {
+                    "to_user_id": to_user_id,
+                    "data": {
+                        "event_type": event_type,
+                        "from_user_id": from_user_id,
+                        "from_nickname": from_nickname,
+                        "updated_at": created_at
+                    }
+                },
+                "last_error": None
             }
             
             self.table.put_item(Item=item)

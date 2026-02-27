@@ -140,29 +140,55 @@ class UserService:
     def _is_profile_complete(self, signup_data) -> bool:
         """프로필 완성도 체크"""
         has_cat_info = signup_data.cat_pattern and signup_data.cat_color
-        has_audio_info = signup_data.meow_audio_url or (hasattr(signup_data, 'train_voice_urls') and signup_data.train_voice_urls)
+        
+        # train_voice_urls가 3개 이상 있어야 완료 (3개 개별 + 1개 병합 = 4개)
+        has_train_voice = False
+        if hasattr(signup_data, 'train_voice_urls') and signup_data.train_voice_urls:
+            train_voice_count = len(signup_data.train_voice_urls) if isinstance(signup_data.train_voice_urls, list) else 0
+            has_train_voice = train_voice_count >= 3  # 최소 3개 필요
+        
+        # meow_audio_url 또는 train_voice_urls (3개 이상) 중 하나라도 있으면 됨
+        has_audio_info = signup_data.meow_audio_url or has_train_voice
+        
         return bool(has_cat_info and has_audio_info)
 
     async def get_lobby_friends(self, user_id: str) -> List[LobbyFriend]:
         """
         로비용 친구 목록 조회 (DynamoDB만 사용)
         - DynamoDB: 친구 관계 레코드에 친구의 모든 프로필 정보가 비정규화되어 저장됨
+        - S3 URL을 presigned URL로 변환 (1시간 유효)
         """
         from app.services.dynamodb_service import dynamodb_service
+        from app.services.s3_service import s3_service
         
         # DynamoDB에서 친구 목록 조회 (한 번의 쿼리로 모든 정보 조회)
         friends_data = await dynamodb_service.get_lobby_friends(user_id)
         
         lobby_friends = []
         for friend_data in friends_data:
+            # S3 URL을 presigned URL로 변환
+            profile_image_url = friend_data.get('profile_image_url')
+            if profile_image_url:
+                try:
+                    profile_image_url = s3_service.generate_presigned_url(profile_image_url, expiration=3600)
+                except Exception as e:
+                    logger.warning(f"Failed to generate presigned URL for profile image: {e}")
+            
+            meow_audio_url = friend_data.get('meow_audio_url')
+            if meow_audio_url:
+                try:
+                    meow_audio_url = s3_service.generate_presigned_url(meow_audio_url, expiration=3600)
+                except Exception as e:
+                    logger.warning(f"Failed to generate presigned URL for meow audio: {e}")
+            
             lobby_friend = LobbyFriend(
                 user_id=friend_data.get('friend_user_id'),
                 email=friend_data.get('email', ''),
                 nickname=friend_data.get('nickname', ''),
-                profile_image_url=friend_data.get('profile_image_url'),
+                profile_image_url=profile_image_url,
                 cat_pattern=friend_data.get('cat_pattern'),
                 cat_color=friend_data.get('cat_color'),
-                meow_audio_url=friend_data.get('meow_audio_url'),
+                meow_audio_url=meow_audio_url,
                 train_voice_urls=friend_data.get('train_voice_urls', []),
                 daily_status=friend_data.get('daily_status'),
                 created_at_timestamp=friend_data.get('created_at', 0),
@@ -242,6 +268,7 @@ class UserService:
     async def update_user(self, user_id: str, user_data: UserUpdate) -> Optional[User]:
         """사용자 정보 수정 + DynamoDB 친구 레코드 동기화"""
         from app.services.dynamodb_service import dynamodb_service
+        import json
         
         db_user = self.db.query(User).filter(User.user_id == user_id).first()
         if not db_user:
@@ -253,7 +280,17 @@ class UserService:
         # None이 아닌 값만 업데이트 (email 같은 NOT NULL 필드 보호)
         for field, value in update_data.items():
             if value is not None:
+                # train_voice_urls는 리스트를 JSON 문자열로 변환
+                if field == 'train_voice_urls' and isinstance(value, list):
+                    value = json.dumps(value)
                 setattr(db_user, field, value)
+        
+        # 프로필 완성도 체크 및 업데이트
+        has_cat_info = db_user.cat_pattern and db_user.cat_color
+        train_voice_urls = json.loads(db_user.train_voice_urls) if db_user.train_voice_urls else []
+        has_train_voice = len(train_voice_urls) >= 3  # 최소 3개 필요
+        has_audio_info = db_user.meow_audio_url or has_train_voice
+        db_user.profile_setup_completed = bool(has_cat_info and has_audio_info)
         
         # updated_at_timestamp 갱신
         import time
@@ -263,9 +300,6 @@ class UserService:
         self.db.refresh(db_user)
         
         # DynamoDB 친구 레코드 동기화 (비정규화된 프로필 정보 업데이트)
-        import json
-        train_voice_urls = json.loads(db_user.train_voice_urls) if db_user.train_voice_urls else []
-        
         profile_data = {
             'email': db_user.email,
             'nickname': db_user.nickname,
@@ -285,14 +319,44 @@ class UserService:
         return db_user
     
     async def delete_user(self, user_id: str) -> bool:
-        """사용자 삭제"""
+        """사용자 완전 삭제 (RDS + DynamoDB + S3)"""
+        from app.services.dynamodb_service import dynamodb_service
+        from app.services.s3_service import s3_service
+        
+        # 1. RDS에서 사용자 조회
         db_user = self.db.query(User).filter(User.user_id == user_id).first()
         if not db_user:
+            logger.warning(f"User not found in RDS: {user_id}")
             return False
         
-        self.db.delete(db_user)
-        self.db.commit()
-        return True
+        logger.info(f"🗑️ Starting complete deletion for user: {user_id}")
+        
+        # 2. DynamoDB에서 친구 관계 삭제
+        try:
+            await dynamodb_service.delete_all_user_friendships(user_id)
+            logger.info(f"✅ DynamoDB friendships deleted for user: {user_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to delete DynamoDB friendships: {e}")
+            # 계속 진행
+        
+        # 3. S3에서 사용자 파일 삭제
+        try:
+            s3_service.delete_user_files(user_id)
+            logger.info(f"✅ S3 files deleted for user: {user_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to delete S3 files: {e}")
+            # 계속 진행
+        
+        # 4. RDS에서 사용자 삭제
+        try:
+            self.db.delete(db_user)
+            self.db.commit()
+            logger.info(f"✅ RDS user deleted: {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to delete user from RDS: {e}")
+            self.db.rollback()
+            return False
     
     async def search_users_by_email(self, email_query: str, limit: int = 10) -> List[User]:
         """이메일로 사용자 검색"""
@@ -581,18 +645,34 @@ class UserService:
     async def get_accepted_friends(self, user_id: str) -> List[dict]:
         """수락된 친구 목록 조회 (accepted)"""
         from app.services.dynamodb_service import dynamodb_service
+        from app.services.s3_service import s3_service
         
         friends_data = await dynamodb_service.get_accepted_friends(user_id)
         
         friends_list = []
         for data in friends_data:
+            # S3 URL을 presigned URL로 변환
+            profile_image_url = data.get('profile_image_url')
+            if profile_image_url:
+                try:
+                    profile_image_url = s3_service.generate_presigned_url(profile_image_url, expiration=3600)
+                except Exception as e:
+                    logger.warning(f"Failed to generate presigned URL for friend profile image: {e}")
+            
+            meow_audio_url = data.get('meow_audio_url')
+            if meow_audio_url:
+                try:
+                    meow_audio_url = s3_service.generate_presigned_url(meow_audio_url, expiration=3600)
+                except Exception as e:
+                    logger.warning(f"Failed to generate presigned URL for friend meow audio: {e}")
+            
             friend = {
                 'user_id': data.get('friend_user_id'),
                 'nickname': data.get('nickname', ''),
-                'profile_image_url': data.get('profile_image_url'),
+                'profile_image_url': profile_image_url,
                 'cat_pattern': data.get('cat_pattern'),
                 'cat_color': data.get('cat_color'),
-                'meow_audio_url': data.get('meow_audio_url'),
+                'meow_audio_url': meow_audio_url,
                 'train_voice_urls': data.get('train_voice_urls', []),
                 'daily_status': data.get('daily_status', ''),
                 'created_at': data.get('created_at', 0)

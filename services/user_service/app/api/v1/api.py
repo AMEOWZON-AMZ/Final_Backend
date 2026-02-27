@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import users, friends, upload, challenges, cat_images, cat_character, cat_character_test
+from app.api.routes import users, friends, upload, challenges, cat_images, cat_character, audio_validation, bgm
 
 api_router = APIRouter()
 
@@ -10,4 +10,5 @@ api_router.include_router(upload.router, prefix="/upload", tags=["upload"])
 api_router.include_router(challenges.router, prefix="/challenges", tags=["challenges"])
 api_router.include_router(cat_images.router, prefix="/cats", tags=["cat-images"])
 api_router.include_router(cat_character.router, prefix="/cat-character", tags=["cat-character"])
-api_router.include_router(cat_character_test.router, prefix="/cat-character-test", tags=["cat-character-test"])
+api_router.include_router(audio_validation.router, prefix="/audio", tags=["audio-validation"])
+api_router.include_router(bgm.router, prefix="/bgm", tags=["bgm"])

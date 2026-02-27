@@ -58,14 +58,16 @@ class Settings(BaseSettings):
     S3_BASE_URL: str = os.getenv("S3_BASE_URL", "")
     
     # DynamoDB settings
-    DYNAMODB_ENDPOINT_URL: str = "http://localhost:8008"  # DynamoDB Local
-    DYNAMODB_REGION: str = "ap-northeast-2"
-    DYNAMODB_ACCESS_KEY_ID: str = "dummy"  # DynamoDB Local용 더미 키
-    DYNAMODB_SECRET_ACCESS_KEY: str = "dummy"  # DynamoDB Local용 더미 키
+    DYNAMODB_ENDPOINT_URL: str = os.getenv("DYNAMODB_ENDPOINT_URL", "http://localhost:8008")  # 환경변수로 설정 가능
+    DYNAMODB_REGION: str = os.getenv("DYNAMODB_REGION", "ap-northeast-2")
+    DYNAMODB_ACCESS_KEY_ID: str = os.getenv("DYNAMODB_ACCESS_KEY_ID", "dummy")  # Pod Identity 사용 시 불필요
+    DYNAMODB_SECRET_ACCESS_KEY: str = os.getenv("DYNAMODB_SECRET_ACCESS_KEY", "dummy")  # Pod Identity 사용 시 불필요
     
     # File upload settings
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB (이미지용)
+    MAX_VIDEO_SIZE: int = 50 * 1024 * 1024  # 50MB (비디오용)
     ALLOWED_IMAGE_TYPES: List[str] = ["image/jpeg", "image/png", "image/webp"]
+    ALLOWED_VIDEO_TYPES: List[str] = ["video/mp4", "video/quicktime"]  # mp4, mov
     ALLOWED_AUDIO_TYPES: List[str] = ["audio/mpeg", "audio/wav", "audio/mp4", "audio/x-m4a", "audio/m4a"]
     
     # Gemini API (챌린지 자동 생성용)

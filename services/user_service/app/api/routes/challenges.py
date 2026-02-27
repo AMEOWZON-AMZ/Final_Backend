@@ -1,7 +1,7 @@
 """
 챌린지 API 라우트
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
 from sqlalchemy.orm import Session
 from datetime import date
 from typing import Optional
@@ -77,21 +77,24 @@ async def get_challenge_by_date(
 
 @router.post("/{challenge_day_id}/submit", response_model=SubmissionResponse, status_code=201)
 async def submit_challenge(
+    request: Request,
     challenge_day_id: int,
     user_id: str = Form(...),
-    image: UploadFile = File(...),
+    image: UploadFile = File(None),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
     altitude: Optional[float] = Form(None),
     db: Session = Depends(get_db)
 ):
     """
-    챌린지 사진 제출 (오늘 날짜만 가능)
+    챌린지 미디어 제출 (오늘 날짜만 가능)
     
     Parameters:
     - challenge_day_id: 챌린지 ID
     - user_id: 사용자 ID (Form)
-    - image: 이미지 파일 (File)
+    - image: 미디어 파일 (이미지 또는 비디오) (File)
+      - 이미지: jpg, jpeg, png, webp (최대 10MB)
+      - 비디오: mp4, mov (최대 50MB)
     - latitude: 위도 (Form, 선택적) - 앱에서 직접 전송
     - longitude: 경도 (Form, 선택적) - 앱에서 직접 전송
     - altitude: 고도 (Form, 선택적) - 앱에서 직접 전송
@@ -99,17 +102,45 @@ async def submit_challenge(
     제약사항:
     - 오늘 날짜 챌린지만 제출 가능
     - 한 챌린지당 1회만 제출 가능
-    - 이미지 파일만 허용
+    - 이미지 또는 비디오 파일만 허용
     
     GPS 우선순위:
     1. 앱에서 전송한 위치 (latitude, longitude) - 가장 정확
-    2. 이미지 EXIF GPS - 백업용
+    2. 이미지 EXIF GPS - 백업용 (비디오는 EXIF 없음)
     3. GPS 없음 - 제출은 가능
     """
     try:
-        # 파일 정보 로깅
+        # 요청 정보 로깅
         logger.info(f"🔍 Submit challenge - challenge_id: {challenge_day_id}, user_id: {user_id}")
-        logger.info(f"🔍 File - filename: {image.filename}, content_type: '{image.content_type}'")
+        logger.info(f"📋 Request content-type: {request.headers.get('content-type')}")
+        
+        # Form 데이터 확인
+        try:
+            form = await request.form()
+            logger.info(f"📋 Form fields received: {list(form.keys())}")
+            for key in form.keys():
+                value = form[key]
+                if hasattr(value, 'filename'):
+                    logger.info(f"   - {key}: FILE (filename={value.filename}, content_type={value.content_type})")
+                else:
+                    logger.info(f"   - {key}: {value}")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not parse form data: {e}")
+        
+        # 파일이 없는 경우 명확한 에러
+        if image is None:
+            logger.error(f"❌ No image file provided in request")
+            logger.error(f"💡 Expected field name: 'image'")
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Image file is required",
+                    "error_code": "MISSING_IMAGE_FILE",
+                    "hint": "Please send image file with field name 'image' using multipart/form-data"
+                }
+            )
+        
+        logger.info(f"✅ File received - filename: {image.filename}, content_type: '{image.content_type}'")
         
         # 앱에서 전송한 위치 확인
         app_provided_gps = latitude is not None and longitude is not None

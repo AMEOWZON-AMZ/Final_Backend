@@ -71,7 +71,7 @@ async def upload_meow_audio(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """야옹 소리 음성 파일 업로드 with Audio Validation (인증 불필요)"""
+    """야옹 소리 음성 파일 업로드 (Audio Guard 제거됨 - /api/v1/audio/validate 사용)"""
     try:
         logger.info(f"🐱 Meow audio upload request from user: {user_id}")
         logger.info(f"📁 File info: {file.filename}, {file.content_type}, {file.size if hasattr(file, 'size') else 'unknown size'}")
@@ -86,46 +86,8 @@ async def upload_meow_audio(
                 detail=error_response(message="User not found", error_code="USER_NOT_FOUND")
             )
         
-        # 파일 읽기
-        file_bytes = await file.read()
-        
-        # Audio Validation & Quality Improvement
-        logger.info("🔍 Running audio validation...")
-        from app.services.audio_guard import audio_guard
-        
-        validation_result = audio_guard.process(file_bytes, file.filename)
-        
-        if validation_result["status"] == "FAIL":
-            logger.warning(f"❌ Audio validation failed: {validation_result['reason']}")
-            user_notice = validation_result.get("user_notice", {})
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_response(
-                    message=user_notice.get("message", "Audio validation failed"),
-                    error_code=validation_result["reason"]
-                )
-            )
-        
-        logger.info(f"✅ Audio validation passed: {validation_result['reason']}")
-        logger.info(f"📊 Metrics: {validation_result['metrics']}")
-        
-        # 처리된 오디오 사용 (품질 개선 완료)
-        processed_audio_bytes = validation_result["audio_bytes"]
-        processed_content_type = validation_result["content_type"]
-        processed_extension = validation_result["file_extension"]
-        
-        # S3에 업로드 (처리된 오디오 사용)
-        from io import BytesIO
-        from fastapi import UploadFile
-        
-        # UploadFile 객체 재생성 (처리된 오디오로)
-        processed_file = UploadFile(
-            file=BytesIO(processed_audio_bytes),
-            filename=f"{user_id}_meow.{processed_extension}",
-            headers={"content-type": processed_content_type}
-        )
-        
-        file_url = await s3_service.upload_meow_audio(processed_file, user_id)
+        # S3에 업로드 (Audio Guard는 별도 API에서 처리)
+        file_url = await s3_service.upload_meow_audio(file, user_id)
         
         # 사용자 야옹 소리 URL 업데이트
         user.meow_audio_url = file_url
@@ -138,13 +100,7 @@ async def upload_meow_audio(
             data={
                 "file_url": file_url,
                 "file_type": "meow_audio",
-                "user_id": user_id,
-                "validation": {
-                    "status": validation_result["status"],
-                    "reason": validation_result["reason"],
-                    "metrics": validation_result["metrics"],
-                    "stt_text": validation_result.get("stt_text")
-                }
+                "user_id": user_id
             },
             message="Meow audio uploaded successfully"
         )
@@ -202,14 +158,60 @@ async def batch_upload_files(
         
         # 암구호 학습용 음성 업로드 (3개)
         train_voice_urls = []
+        train_voice_files_data = []  # 합치기 위해 파일 데이터 저장
+        
         if train_voice:
             for idx, voice_file in enumerate(train_voice[:3], 1):  # 최대 3개만
                 try:
+                    # 개별 파일 업로드
                     file_url = await s3_service.upload_train_voice(voice_file, user_id, idx)
                     train_voice_urls.append(file_url)
                     logger.info(f"✅ Train voice {idx} uploaded: {file_url}")
+                    
+                    # 파일 데이터 저장 (합치기 위해)
+                    await voice_file.seek(0)  # 파일 포인터 리셋
+                    file_data = await voice_file.read()
+                    train_voice_files_data.append(file_data)
+                    
                 except Exception as e:
                     logger.error(f"❌ Failed to upload train voice {idx}: {e}")
+            
+            # 3개 파일을 합쳐서 추가 업로드
+            if len(train_voice_files_data) == 3:
+                try:
+                    from pydub import AudioSegment
+                    import io
+                    
+                    logger.info("🔗 Merging 3 train voice files...")
+                    
+                    # 각 파일을 AudioSegment로 변환
+                    audio_segments = []
+                    for idx, file_data in enumerate(train_voice_files_data, 1):
+                        try:
+                            audio = AudioSegment.from_file(io.BytesIO(file_data))
+                            audio_segments.append(audio)
+                            logger.info(f"  - File {idx} loaded: {len(audio)}ms")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to load audio file {idx}: {e}")
+                            raise
+                    
+                    # 3개 파일 합치기 (순차적으로 이어붙이기)
+                    merged_audio = audio_segments[0] + audio_segments[1] + audio_segments[2]
+                    logger.info(f"✅ Merged audio length: {len(merged_audio)}ms")
+                    
+                    # WAV 형식으로 변환
+                    merged_buffer = io.BytesIO()
+                    merged_audio.export(merged_buffer, format="wav")
+                    merged_bytes = merged_buffer.getvalue()
+                    
+                    # S3에 업로드
+                    merged_url = await s3_service.upload_merged_train_voice(merged_bytes, user_id)
+                    train_voice_urls.append(merged_url)  # 4번째 URL로 추가
+                    logger.info(f"✅ Merged train voice uploaded: {merged_url}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to merge and upload train voices: {e}")
+                    # 합치기 실패해도 개별 파일은 이미 업로드됨
             
             if train_voice_urls:
                 import json

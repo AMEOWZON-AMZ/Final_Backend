@@ -63,7 +63,8 @@ PRIORITY 3: HAIRSTYLE TO FUR ON HEAD (CRITICAL)
 5. COLORS (MATCH BRIGHTNESS):
    - Hair color → Head fur color (light to light, dark to dark, keep exact tone)
    - Skin warmth → Body fur warmth (warm to orange/cream, cool to gray/silver)
-   - Clothing colors → keep exact same
+   - Clothing colors → Cat's outfit colors (keep exact same colors and style)
+   - Clothing style → Translate to cat-sized clothing (casual/formal/sporty)
 
 6. OTHER FEATURES:
    - Face shape and proportions
@@ -105,8 +106,15 @@ CRITICAL FUR RULES:
 BODY:
 - 3D rendered fur texture matching hair length (short: sleek / long: fluffy and flowing)
 - Head fur styled to match original hairstyle
-- Cute cat paws if hands visible (pink pads)
+- WEARING CLOTHES: Cat is dressed in outfit matching original person's clothing
+  * Shirt/Top: Same color and style as original (t-shirt, hoodie, sweater, etc.)
+  * Pants/Bottoms: If visible, match original style (jeans, skirt, shorts, etc.)
+  * Accessories: Keep any visible accessories (hat, scarf, glasses, etc.)
+  * Fit: Clothes fit naturally on cat body (not too tight, not too loose)
+  * Style: Maintain casual/formal/sporty vibe from original
+- Cute cat paws visible at sleeves/cuffs (pink pads)
 - Long fluffy tail visible in frame (extra fluffy if long-haired)
+- Bipedal stance (standing like a person, not on all fours)
 
 == FINAL CHECKS ==
 1. EYE SHAPE preserved exactly (shape/size/angle/spacing)?
@@ -125,6 +133,9 @@ BODY:
 14. Large ears on TOP of head?
 15. Professional 3D quality?
 16. WHITE background?
+17. WEARING CLOTHES that match original outfit (color and style)?
+18. Cat paws visible at sleeves/cuffs?
+19. Bipedal stance (standing like a person)?
 
 BALANCE: 70% cute cat features + 30% preserved human identity
 

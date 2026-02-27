@@ -1,0 +1,66 @@
+[
+  {
+    "cat_color": "#8B008B",
+    "cat_pattern": "stripe",
+    "created_at": "1771572088545",
+    "daily_status": "STABLE",
+    "duress_audio_url": "",
+    "duress_code": "",
+    "email": "eunbin2158@gmail.com",
+    "meow_audio_url": "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/audio/meow/74e8edac-f031-70a5-9bef-f388ea61c0a8_20260224_074142_74f55be2.m4a",
+    "nickname": "랄라",
+    "profile_image_url": "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/images/KakaoTalk_20260106_173704642_01.jpg",
+    "status": "accepted",
+    "train_voice_urls": [],
+    "updated_at": "1772075299017",
+    "user_id": "c478cd4c-5071-7060-2991-cc9b3bb59dff",
+    "friend_user_id": "74e8edac-f031-70a5-9bef-f388ea61c0a8"
+  },
+  {
+    "cat_color": "#5F9EA0",
+    "cat_pattern": "solid",
+    "created_at": "1771571892603",
+    "daily_status": "CHAOS",
+    "duress_audio_url": "",
+    "duress_code": "",
+    "email": "wha02068@gmail.com",
+    "meow_audio_url": "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/audio/meow/b4589ddc-a001-7001-77aa-c2c3f3fd6a98_20260226_112655_8ff76e65.m4a",
+    "nickname": "샤미드",
+    "profile_image_url": "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/cat-characters/b4589ddc-a001-7001-77aa-c2c3f3fd6a98_20260226_112653_ce29127f.png",
+    "status": "accepted",
+    "train_voice_urls": [],
+    "updated_at": "1772105215825",
+    "user_id": "c478cd4c-5071-7060-2991-cc9b3bb59dff",
+    "friend_user_id": "b4589ddc-a001-7001-77aa-c2c3f3fd6a98"
+  },
+  {
+    "cat_color": "#FFDEAD",
+    "cat_pattern": "solid",
+    "created_at": "1771841068745",
+    "daily_status": "SLEEP",
+    "duress_audio_url": null,
+    "duress_code": null,
+    "email": "sjm31566@gmail.com",
+    "meow_audio_url": "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/audio/meow/c478cd4c-5071-7060-2991-cc9b3bb59dff_20260226_103451_0ca2d480.m4a",
+    "nickname": "안냥편지",
+    "profile_image_url": "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/images/KakaoTalk_20260106_173704642_01.jpg",
+    "status": "accepted",
+    "train_voice_urls": [
+      "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/audio/train/c478cd4c-5071-7060-2991-cc9b3bb59dff_20260226_103451_91167d6a_train_voice_1.m4a",
+      "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/audio/train/c478cd4c-5071-7060-2991-cc9b3bb59dff_20260226_103452_3cc648a2_train_voice_2.m4a",
+      "https://ameowzon-test-files.s3.ap-northeast-2.amazonaws.com/profiles/audio/train/c478cd4c-5071-7060-2991-cc9b3bb59dff_20260226_103452_9561d318_train_voice_3.m4a"
+    ],
+    "updated_at": "1772102092097",
+    "user_id": "c478cd4c-5071-7060-2991-cc9b3bb59dff",
+    "friend_user_id": "c478cd4c-5071-7060-2991-cc9b3bb59dff"
+  },
+  {
+    "updated_at": "1772104007947",
+    "daily_status": "STABLE",
+    "user_id": "c478cd4c-5071-7060-2991-cc9b3bb59dff",
+    "created_at": "1772104007947",
+    "nickname": "테스트큐알임ㅋㅋ",
+    "status": "accepted",
+    "friend_user_id": "f980a174-9712-43e7-ac5e-15a7f0624427"
+  }
+]

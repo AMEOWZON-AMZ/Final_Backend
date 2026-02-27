@@ -7,9 +7,7 @@ from typing import Optional
 from app.core.database import get_db
 from app.schemas.quick_register import QuickRegisterResponse
 from app.services.quick_register_service import quick_register_service
-import logging
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 router = APIRouter()
 
@@ -17,7 +15,6 @@ router = APIRouter()
 @router.post("/register", response_model=QuickRegisterResponse)
 async def quick_register(
     nickname: str = Form(...),
-    target_user_id: Optional[str] = Form(None),  # 시연용으로 선택 사항으로 변경
     phone_number: Optional[str] = Form(None),
     cat_pattern: Optional[str] = Form("solid"),
     cat_color: Optional[str] = Form("#FF6B6B"),
@@ -31,18 +28,17 @@ async def quick_register(
     사용자 생성 + 친구 등록 + 음성 파일 업로드를 한 번에 처리합니다.
     
     **시연용 설정:**
-    - target_user_id를 전달하지 않으면 자동으로 고정 사용자와 친구 등록됩니다.
-    - 고정 사용자 ID: 44082dbc-b071-70c4-4794-81b840c61c4e
+    - target_user_id는 고정값으로 자동 설정됩니다.
+    - 고정 사용자 ID: c478cd4c-5071-7060-2991-cc9b3bb59dff
     
     **사용 시나리오:**
-    1. 사용자 A가 QR 코드 생성 (자신의 user_id 포함)
+    1. 사용자 A가 QR 코드 생성
     2. 사용자 B가 QR 코드 스캔 → 웹 페이지 이동
     3. 웹 페이지에서 닉네임 + 음성 파일 입력
-    4. 이 API 호출 → 사용자 B 생성 + A와 친구 등록 + 음성 파일 업로드
+    4. 이 API 호출 → 사용자 B 생성 + 고정 사용자와 친구 등록 + 음성 파일 업로드
     
     **Parameters (Form):**
     - nickname: 새 사용자 닉네임 (필수)
-    - target_user_id: 친구로 등록할 대상 사용자 ID (선택, 미입력시 시연용 고정값 사용)
     - phone_number: 전화번호 (선택, 010-1234-5678 형식)
     - cat_pattern: 고양이 무늬 (선택, 기본값: solid)
     - cat_color: 고양이 색상 (선택, 기본값: #FF6B6B)
@@ -62,7 +58,6 @@ async def quick_register(
     ```javascript
     const formData = new FormData();
     formData.append('nickname', '새친구');
-    // target_user_id 생략 가능 (시연용 고정값 사용)
     formData.append('phone_number', '010-1234-5678');
     formData.append('cat_pattern', 'stripe');
     formData.append('cat_color', '#FFD700');
@@ -78,19 +73,24 @@ async def quick_register(
     ```
     """
     try:
-        # 시연용: target_user_id가 없으면 고정값 사용
-        DEMO_TARGET_USER_ID = "44082dbc-b071-70c4-4794-81b840c61c4e"
-        actual_target_user_id = target_user_id or DEMO_TARGET_USER_ID
+        # 고정 target_user_id 사용
+        FIXED_TARGET_USER_ID = "c478cd4c-5071-7060-2991-cc9b3bb59dff"
         
-        logger.info(f"📱 Quick register request: {nickname} → {actual_target_user_id}")
-        if not target_user_id:
-            logger.info(f"🎯 Using demo target user ID: {DEMO_TARGET_USER_ID}")
+        # 받은 데이터 로깅
+        logger.info(f"📱 Quick register request received")
+        logger.info(f"  - nickname: {nickname}")
+        logger.info(f"  - phone_number: {phone_number}")
+        logger.info(f"  - cat_pattern: {cat_pattern}")
+        logger.info(f"  - cat_color: {cat_color}")
+        logger.info(f"  - meow_audio: {meow_audio.filename if meow_audio else None}")
+        logger.info(f"  - train_voice count: {len(train_voice) if train_voice else 0}")
+        logger.info(f"  - target_user_id (FIXED): {FIXED_TARGET_USER_ID}")
         
         # 사용자 생성 및 친구 등록
         result = await quick_register_service.create_user_and_add_friend(
             db=db,
             nickname=nickname,
-            target_user_id=actual_target_user_id,
+            target_user_id=FIXED_TARGET_USER_ID,
             phone_number=phone_number,
             cat_pattern=cat_pattern or "solid",
             cat_color=cat_color or "#FF6B6B",
@@ -103,6 +103,15 @@ async def quick_register(
             message = f"환영합니다! {result['target_nickname']}님과 친구가 되었습니다."
         else:
             message = f"계정이 생성되었습니다. (친구 등록 실패: 나중에 다시 시도해주세요)"
+        
+        logger.info(f"✅ Quick register success:")
+        logger.info(f"  - user_id: {result['user_id']}")
+        logger.info(f"  - nickname: {result['nickname']}")
+        logger.info(f"  - friend_code: {result['friend_code']}")
+        logger.info(f"  - friend_added: {result['friend_added']}")
+        logger.info(f"  - target_nickname: {result['target_nickname']}")
+        logger.info(f"  - meow_audio_url: {result.get('meow_audio_url')}")
+        logger.info(f"  - train_voice_urls: {result.get('train_voice_urls', [])}")
         
         return QuickRegisterResponse(
             success=True,

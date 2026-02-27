@@ -107,19 +107,21 @@ class AudioGuard:
             "stt_text_len": 0,
         }
 
+        logger.info("=" * 80)
         logger.info(
-            f"AudioGuard.process() start — "
-            f"file={filename}, size={len(raw_bytes)} bytes"
+            f"🎵 [AUDIO_GUARD] Starting audio validation pipeline"
         )
-        logger.info("🎵 [AUDIO_GUARD] Step 0: Starting audio validation")
+        logger.info(f"   File: {filename}")
+        logger.info(f"   Size: {len(raw_bytes):,} bytes ({len(raw_bytes)/1024:.2f} KB)")
+        logger.info("=" * 80)
 
         # ── Step 0: 디코딩 ─────────────────────────────────────
-        logger.info(f"🎵 [AUDIO_GUARD] Step 0.1: Decoding audio file (format: {filename.rsplit('.', 1)[-1] if '.' in filename else 'unknown'})")
+        ext = (
+            filename.rsplit('.', 1)[-1].lower()
+            if '.' in filename else 'unknown'
+        )
+        logger.info(f"🎵 [AUDIO_GUARD] Step 0.1: Decoding audio file (format: {ext})")
         try:
-            ext = (
-                filename.rsplit('.', 1)[-1].lower()
-                if '.' in filename else ''
-            )
             fmt_map = {
                 'mp3': 'mp3', 'wav': 'wav',
                 'mp4': 'mp4', 'm4a': 'mp4',
@@ -127,14 +129,14 @@ class AudioGuard:
             audio = AudioSegment.from_file(
                 io.BytesIO(raw_bytes), format=fmt_map.get(ext)
             )
+            logger.info(f"✅ [AUDIO_GUARD] Audio decoded successfully")
+            logger.info(f"   Original: {audio.frame_rate}Hz, {audio.channels}ch, {audio.sample_width*8}bit, {len(audio)}ms")
         except Exception as e:
-            logger.error(f"❌ [AUDIO_GUARD] Audio decoding failed: {e}")
+            logger.error(f"❌ [AUDIO_GUARD] Audio decoding failed: {type(e).__name__}: {e}")
             return self._fail("FAIL_DECODE", metrics)
-
-        logger.info(f"✅ [AUDIO_GUARD] Step 0.2: Audio decoded successfully")
         
         # 16kHz mono + 16-bit(PCM16)로 강제 (중요: RMS/클리핑/온셋 스케일 안정화)
-        logger.info(f"🎵 [AUDIO_GUARD] Step 0.3: Converting to 16kHz mono PCM16")
+        logger.info(f"🎵 [AUDIO_GUARD] Step 0.2: Converting to 16kHz mono PCM16...")
         audio = (
             audio.set_frame_rate(SAMPLE_RATE)
                  .set_channels(CHANNELS)
@@ -144,17 +146,23 @@ class AudioGuard:
             audio.get_array_of_samples(), dtype=np.float32
         ) / 32768.0
         metrics["dur_total_s"] = round(len(raw_samples) / SAMPLE_RATE, 3)
-        logger.info(f"✅ [AUDIO_GUARD] Audio normalized: duration={metrics['dur_total_s']}s, samples={len(raw_samples)}")
+        logger.info(f"✅ [AUDIO_GUARD] Audio normalized")
+        logger.info(f"   Duration: {metrics['dur_total_s']}s")
+        logger.info(f"   Samples: {len(raw_samples):,}")
+        logger.info(f"   Format: {SAMPLE_RATE}Hz, {CHANNELS}ch, 16bit")
 
         # ── Step 0': Onset 검출 + 3초 추출 ─────────────────────
-        logger.info(f"🎵 [AUDIO_GUARD] Step 1: Detecting speech onset (max wait: {MAX_WAIT_S}s)")
+        logger.info(f"🎵 [AUDIO_GUARD] Step 1: Detecting speech onset (max wait: {MAX_WAIT_S}s)...")
         wait_samples = int(MAX_WAIT_S * SAMPLE_RATE)
         scan = raw_samples[:min(len(raw_samples), wait_samples)]
 
         n_frames = len(scan) // FRAME_SAMPLES
         if n_frames <= 0:
+            logger.error(f"❌ [AUDIO_GUARD] Audio too short for frame analysis")
             return self._fail("FAIL_TOO_SHORT", metrics)
 
+        logger.info(f"   Analyzing {n_frames} frames ({FRAME_MS}ms each)...")
+        
         # frame rms + peak (초성은 peak가 잘 잡힘)
         frame_rms = np.empty(n_frames, dtype=np.float32)
         frame_peak = np.empty(n_frames, dtype=np.float32)
@@ -171,6 +179,8 @@ class AudioGuard:
 
         noise_rms = float(np.median(rms_sorted[:k]))
         noise_peak = float(np.median(peak_sorted[:k]))
+        
+        logger.info(f"   Noise level: RMS={noise_rms:.5f}, Peak={noise_peak:.5f}")
 
         # 감지 임계값: 너무 빡세지 않게 (초성 살리기)
         thr_rms_hi  = max(noise_rms * 1.8, 0.0015)
@@ -178,6 +188,8 @@ class AudioGuard:
 
         thr_rms_lo  = max(noise_rms * 1.2, 0.0010)
         thr_peak_lo = max(noise_peak * 1.3, 0.006)
+        
+        logger.info(f"   Thresholds: RMS_hi={thr_rms_hi:.5f}, Peak_hi={thr_peak_hi:.5f}")
 
         # 1) 먼저 "확실한 발화" 프레임 찾기 (hi)
         hit = None
@@ -190,6 +202,8 @@ class AudioGuard:
             # 5초 내에 발화 없음
             metrics["onset_ms"] = -1
             logger.warning(f"⚠️ [AUDIO_GUARD] No speech detected within {MAX_WAIT_S}s")
+            logger.warning(f"   Max RMS in scan: {np.max(frame_rms):.5f} (threshold: {thr_rms_hi:.5f})")
+            logger.warning(f"   Max Peak in scan: {np.max(frame_peak):.5f} (threshold: {thr_peak_hi:.5f})")
             return self._fail("FAIL_NO_SPEECH_WITHIN_5S", metrics)
 
         # 2) backtrack: lo 기준으로 앞 프레임까지 끌어오기 (초성 보호)
@@ -197,7 +211,9 @@ class AudioGuard:
         while j > 0 and ((frame_rms[j-1] >= thr_rms_lo) or (frame_peak[j-1] >= thr_peak_lo)):
             j -= 1
 
-        logger.info(f"✅ [AUDIO_GUARD] Speech onset detected at frame {hit} (backtracked to {j})")
+        logger.info(f"✅ [AUDIO_GUARD] Speech onset detected")
+        logger.info(f"   Initial hit at frame {hit} ({hit*FRAME_MS}ms)")
+        logger.info(f"   Backtracked to frame {j} ({j*FRAME_MS}ms)")
         
         onset_idx = j * FRAME_SAMPLES
 
@@ -217,30 +233,46 @@ class AudioGuard:
         metrics["hit_frame"] = int(hit)
         metrics["backtracked_frame"] = int(j)
         
-        logger.info(f"✅ [AUDIO_GUARD] Speech clip extracted: onset={metrics['onset_ms']}ms, duration={metrics['speech_dur_s']}s")
+        logger.info(f"✅ [AUDIO_GUARD] Speech clip extracted")
+        logger.info(f"   Onset: {metrics['onset_ms']}ms")
+        logger.info(f"   Duration: {metrics['speech_dur_s']}s")
+        logger.info(f"   Samples: {len(samples):,}")
         
         # ── Step 1: 품질 가드레일 ──────────────────────────────
-        logger.info(f"🎵 [AUDIO_GUARD] Step 2: Checking audio quality")
+        logger.info(f"🎵 [AUDIO_GUARD] Step 2: Checking audio quality...")
         fail_reason = self._check_quality(samples, metrics)
         if fail_reason:
             logger.warning(f"⚠️ [AUDIO_GUARD] Quality check failed: {fail_reason}")
+            logger.warning(f"   RMS: {metrics.get('rms', 0):.4f} (threshold: {SILENCE_RMS_THRESHOLD})")
+            logger.warning(f"   Clip ratio: {metrics.get('clip_ratio', 0):.4f} (threshold: {CLIPPING_RATIO_THRESHOLD})")
             return self._fail(fail_reason, metrics)
         
-        logger.info(f"✅ [AUDIO_GUARD] Quality check passed: RMS={metrics.get('rms', 0):.4f}, clip_ratio={metrics.get('clip_ratio', 0):.4f}")
+        logger.info(f"✅ [AUDIO_GUARD] Quality check passed")
+        logger.info(f"   RMS: {metrics.get('rms', 0):.4f}")
+        logger.info(f"   Clip ratio: {metrics.get('clip_ratio', 0):.4f}")
 
         # ── Step 2: STT (항상 실행) ────────────────────────────
-        logger.info(f"🎵 [AUDIO_GUARD] Step 3: Running STT (Speech-to-Text)")
+        logger.info(f"🎵 [AUDIO_GUARD] Step 3: Running STT (Speech-to-Text)...")
         raw_text = self._run_stt(samples)
-        logger.info(f"✅ [AUDIO_GUARD] STT completed: text='{raw_text if raw_text else '(empty)'}'")
+        if raw_text:
+            logger.info(f"✅ [AUDIO_GUARD] STT completed: '{raw_text}' (length: {len(raw_text)})")
+        else:
+            logger.info(f"✅ [AUDIO_GUARD] STT completed: (empty result)")
 
         # ── Step 3: 텍스트 판정 ────────────────────────────────
-        logger.info(f"🎵 [AUDIO_GUARD] Step 4: Validating text content")
+        logger.info(f"🎵 [AUDIO_GUARD] Step 4: Validating text content...")
         clip_start_ms = int(start_idx / SAMPLE_RATE * 1000)
         clip_end_ms = clip_start_ms + int(MAX_DURATION_S * 1000)
         clip_audio = audio[clip_start_ms:clip_end_ms]
 
         result = self._judge_text(raw_text, clip_audio, metrics)
-        logger.info(f"🎵 [AUDIO_GUARD] Validation complete: status={result['status']}, reason={result['reason']}")
+        
+        logger.info("=" * 80)
+        logger.info(f"🏁 [AUDIO_GUARD] Validation pipeline complete")
+        logger.info(f"   Final status: {result['status']}")
+        logger.info(f"   Reason: {result['reason']}")
+        logger.info("=" * 80)
+        
         return result
 
     # ──────────────────────────────────────────────────────────────
@@ -431,6 +463,8 @@ class AudioGuard:
         audio: AudioSegment, metrics: Dict
     ) -> Dict[str, Any]:
 
+        logger.info("🔍 [AUDIO_GUARD] Text judgment starting...")
+        
         # 기본: LLM 사용 여부 디폴트
         metrics["llm_used"] = False
         metrics["llm_verdict"] = None
@@ -439,46 +473,57 @@ class AudioGuard:
         # ── (D) STT 빈 텍스트 / 실패 ──
         if not raw_text or not raw_text.strip():
             metrics["stt_text_len"] = 0
+            logger.info("   ℹ️ STT returned empty text → treating as button sound (OK)")
             # STT가 없지만 소리는 있음(품질 가드레일 통과) → 버튼 사운드로 OK
             return self._ok("OK_STT_EMPTY", audio, metrics, stt_text=None)
 
-        logger.info(f"STT 원본: '{raw_text}'")
+        logger.info(f"   📝 STT raw text: '{raw_text}'")
 
         # 텍스트 정규화
         normalized = self._normalize_text(raw_text)
         metrics["stt_text_len"] = len(normalized)
-        logger.info(f"정규화: '{normalized}' (len={len(normalized)})")
+        logger.info(f"   📝 Normalized text: '{normalized}' (length: {len(normalized)})")
 
         # 정규화 후 빈 문자열 (특수문자만 있었던 경우)
         if not normalized:
+            logger.info("   ℹ️ Normalized text is empty (special chars only) → OK")
             return self._ok("OK_STT_EMPTY", audio, metrics, stt_text=None)
 
         # 숫자만이면 (ASR 오인식) → 버튼 사운드로 OK
         if normalized.isdigit():
+            logger.info(f"   ℹ️ Text is digits only ('{normalized}') → treating as button sound (OK)")
             return self._ok("OK_STT_EMPTY", audio, metrics, stt_text=None)
 
         # ── (A) Meow-lexicon → OK ──
+        logger.info("   🔍 Checking meow lexicon pattern...")
         if self._is_meow_lexicon(normalized):
+            logger.info(f"   ✅ Matched meow lexicon pattern → PASS")
             return self._ok("OK_MEOW_LEXICON", audio, metrics, normalized)
+        logger.info("   ❌ Not a meow lexicon pattern")
 
         # ── (B) 명백한 문장성 → 즉시 FAIL ──
+        logger.info("   🔍 Checking if text is sentence-like...")
         if self._is_sentence_like(raw_text, normalized):
+            logger.info(f"   ❌ Text appears to be a sentence (length: {len(normalized)}) → FAIL")
             return self._fail("FAIL_TEXT_SENTENCE", metrics, normalized)
+        logger.info("   ✅ Not obviously a sentence")
 
         # ── (C) 나머지 전부 → LLM 판정 ──
-        logger.info(f"애매한 텍스트 (len={len(normalized)}) → LLM 판정 시도")
+        logger.info(f"   🤖 Ambiguous text (length={len(normalized)}) → requesting LLM judgment...")
 
         metrics["llm_used"] = True
         try:
             from app.services.audio_llm_service import audio_llm_service
+            logger.info(f"   🤖 Calling LLM with text: '{normalized}'")
             verdict = audio_llm_service.judge(normalized, raw_text)
             metrics["llm_verdict"] = verdict
+            logger.info(f"   🤖 LLM verdict: {verdict}")
 
             if verdict == "ALLOW":
-                # ✅ 여기서 OK_NON_LINGUISTIC 말고 "텍스트 허용" reason으로 분리
+                logger.info(f"   ✅ LLM allowed the text → PASS")
                 return self._ok("OK_TEXT_ALLOWED", audio, metrics, normalized)
             else:
-                # ✅ FAIL_LLM 말고 "금지표현" 의미로 reason 분리
+                logger.info(f"   ❌ LLM rejected the text → FAIL")
                 return self._fail("FAIL_BANNED_TEXT", metrics, normalized)
 
         except Exception as e:
@@ -487,7 +532,8 @@ class AudioGuard:
             # 2) fail-open(개방): OK_TEXT_ALLOWED
             # 지금은 네 목적상 fail-close 유지할게 (원하면 바꿔줄게)
             metrics["llm_error"] = str(e)
-            logger.warning(f"LLM 실패: {e} → FAIL_LLM")
+            logger.error(f"   💥 LLM error: {type(e).__name__}: {e}")
+            logger.warning(f"   ⚠️ LLM failed → applying fail-close policy (FAIL)")
             return self._fail("FAIL_LLM", metrics, normalized)
     # ── 텍스트 판정 유틸 ───────────────────────────────────────
 

@@ -10,9 +10,7 @@ import random
 import string
 from datetime import datetime
 from app.models.user import User
-import logging
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class QuickRegisterService:
@@ -144,42 +142,68 @@ class QuickRegisterService:
                 import boto3
                 from app.core.config import settings
                 
+                logger.info(f"🔗 Attempting to add friend relationship to DynamoDB...")
+                
                 dynamodb = boto3.resource('dynamodb', region_name=settings.AWS_REGION)
                 friends_table = dynamodb.Table('user_friends')
                 
                 current_timestamp = int(datetime.now().timestamp() * 1000)
+                
+                # daily_status 랜덤 선택
+                daily_status_options = ['STABLE', 'SLEEP', 'LETHARGY', 'CHAOS', 'TRAVEL']
+                random_status_1 = random.choice(daily_status_options)
+                random_status_2 = random.choice(daily_status_options)
+                
+                logger.info(f"📝 Adding: {new_user_id} → {target_user_id}")
+                logger.info(f"   - nickname: {target_user.nickname}")
+                logger.info(f"   - cat_pattern: {target_user.cat_pattern or ''}")
+                logger.info(f"   - cat_color: {target_user.cat_color or ''}")
+                logger.info(f"   - daily_status: {random_status_1}")
                 
                 # 새 사용자 → 대상 사용자
                 friends_table.put_item(
                     Item={
                         'user_id': new_user_id,
                         'friend_user_id': target_user_id,
-                        'nickname': target_user.nickname,  # 기존 시스템과 동일하게 'nickname' 사용
+                        'nickname': target_user.nickname,
+                        'cat_pattern': target_user.cat_pattern or '',
+                        'cat_color': target_user.cat_color or '',
                         'status': 'accepted',
-                        'daily_status': 'STABLE',
+                        'daily_status': random_status_1,
                         'created_at': current_timestamp,
                         'updated_at': current_timestamp
                     }
                 )
+                logger.info(f"✅ Added: {new_user_id} → {target_user_id}")
+                
+                logger.info(f"📝 Adding: {target_user_id} → {new_user_id}")
+                logger.info(f"   - nickname: {nickname}")
+                logger.info(f"   - cat_pattern: {cat_pattern or ''}")
+                logger.info(f"   - cat_color: {cat_color or ''}")
+                logger.info(f"   - daily_status: {random_status_2}")
                 
                 # 대상 사용자 → 새 사용자
                 friends_table.put_item(
                     Item={
                         'user_id': target_user_id,
                         'friend_user_id': new_user_id,
-                        'nickname': nickname,  # 기존 시스템과 동일하게 'nickname' 사용
+                        'nickname': nickname,
+                        'cat_pattern': cat_pattern or '',
+                        'cat_color': cat_color or '',
                         'status': 'accepted',
-                        'daily_status': 'STABLE',
+                        'daily_status': random_status_2,
                         'created_at': current_timestamp,
                         'updated_at': current_timestamp
                     }
                 )
+                logger.info(f"✅ Added: {target_user_id} → {new_user_id}")
                 
                 friend_added = True
                 logger.info(f"✅ Quick register: Added friend relationship {new_user_id} ↔ {target_user_id}")
                 
             except Exception as e:
                 logger.error(f"❌ Failed to add friend relationship: {e}")
+                logger.exception(e)  # 전체 스택 트레이스 출력
                 # 친구 추가 실패해도 사용자는 생성됨
             
             return {

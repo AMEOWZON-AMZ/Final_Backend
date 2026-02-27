@@ -629,7 +629,7 @@ class DynamoDBService:
                 Item={
                     'user_id': user_id,
                     'friend_user_id': user_id,  # 자기 자신
-                    'status': 'self',  # 특별한 상태
+                    'status': 'accepted',  # accepted 상태로 변경
                     'daily_status': '',  # 초기값
                     'email': profile_data.get('email', ''),
                     'nickname': profile_data.get('nickname', ''),
@@ -721,6 +721,126 @@ class DynamoDBService:
         except ClientError as e:
             logger.error(f"❌ 본인 status 조회 실패: {e}")
             return None
+    
+    async def delete_all_user_friendships(self, user_id: str) -> bool:
+        """사용자의 모든 친구 관계 삭제 (양방향)"""
+        if not self.friends_table:
+            logger.warning("DynamoDB friends table not initialized")
+            return False
+        
+        try:
+            deleted_count = 0
+            
+            # 1. user_id가 PK인 모든 레코드 삭제 (본인이 주체인 관계)
+            response = self.friends_table.query(
+                KeyConditionExpression=Key('user_id').eq(user_id)
+            )
+            
+            for item in response.get('Items', []):
+                self.friends_table.delete_item(
+                    Key={
+                        'user_id': item['user_id'],
+                        'friend_user_id': item['friend_user_id']
+                    }
+                )
+                deleted_count += 1
+                logger.info(f"Deleted: {item['user_id']} -> {item['friend_user_id']}")
+            
+            # 2. friend_user_id가 user_id인 모든 레코드 삭제 (다른 사람이 주체인 관계)
+            # GSI를 사용하여 조회
+            response = self.friends_table.query(
+                IndexName='FriendUserIdIndex',
+                KeyConditionExpression=Key('friend_user_id').eq(user_id)
+            )
+            
+            for item in response.get('Items', []):
+                self.friends_table.delete_item(
+                    Key={
+                        'user_id': item['user_id'],
+                        'friend_user_id': item['friend_user_id']
+                    }
+                )
+                deleted_count += 1
+                logger.info(f"Deleted: {item['user_id']} -> {item['friend_user_id']}")
+            
+            logger.info(f"✅ Total {deleted_count} friendship records deleted for user: {user_id}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"❌ Failed to delete friendships: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during friendship deletion: {e}")
+            return False
+    
+    async def update_bgm_url(self, user_id: str, bgm_url: str) -> bool:
+        """
+        사용자의 BGM URL 업데이트 (해당 사용자를 친구로 가진 모든 레코드)
+        
+        SageMaker에서 생성한 BGM을 DynamoDB에 저장
+        friend_user_id가 user_id와 일치하는 모든 레코드를 업데이트
+        
+        Args:
+            user_id: 사용자 ID
+            bgm_url: S3에 저장된 BGM 파일 URL
+        
+        Returns:
+            성공 여부
+        """
+        if not self.friends_table:
+            logger.error("❌ DynamoDB friends_table not initialized")
+            return False
+        
+        try:
+            current_time = int(datetime.now().timestamp() * 1000)
+            
+            # 이 사용자를 친구로 가진 모든 레코드 조회 (Scan 사용)
+            logger.info(f"🔍 Scanning for all records where friend_user_id = {user_id}")
+            
+            response = self.friends_table.scan(
+                FilterExpression='friend_user_id = :friend_id',
+                ExpressionAttributeValues={
+                    ':friend_id': user_id
+                }
+            )
+            
+            items = response.get('Items', [])
+            if not items:
+                logger.error(f"❌ No records found with friend_user_id: {user_id}")
+                return False
+            
+            logger.info(f"📋 Found {len(items)} records to update")
+            
+            # 각 레코드의 BGM URL 업데이트
+            updated_count = 0
+            for item in items:
+                try:
+                    self.friends_table.update_item(
+                        Key={
+                            'user_id': item['user_id'],
+                            'friend_user_id': user_id
+                        },
+                        UpdateExpression='SET bgm_url = :bgm_url, updated_at = :updated_at',
+                        ExpressionAttributeValues={
+                            ':bgm_url': bgm_url,
+                            ':updated_at': current_time
+                        }
+                    )
+                    updated_count += 1
+                    logger.info(f"  ✅ Updated: user_id={item['user_id']}, friend_user_id={user_id}")
+                except Exception as e:
+                    logger.error(f"  ❌ Failed to update record: user_id={item['user_id']}, error={e}")
+            
+            logger.info(f"✅ BGM URL updated for {updated_count}/{len(items)} records")
+            logger.info(f"📀 BGM URL: {bgm_url}")
+            return updated_count > 0
+            
+        except ClientError as e:
+            logger.error(f"❌ Failed to update BGM URL: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Unexpected error updating BGM URL: {e}")
+            return False
 
 
 # 전역 DynamoDB 서비스 인스턴스

@@ -30,16 +30,14 @@ async def generate_cat_character(
     - image: 원본 사진 파일
     
     Returns:
-    - original_url: 원본 이미지 URL (S3)
-    - generated_image: 생성된 이미지 (base64)
-    - generated_url: 생성된 이미지 URL (S3에 업로드 후)
+    - generated_url: 생성된 이미지 URL (S3)
+    - generated_image_base64: 생성된 이미지 (base64, 프론트엔드 즉시 표시용)
     
     Process:
     1. 원본 이미지를 읽어서 바이트로 변환
     2. Gemini 2.5 Flash Image API로 고양이 캐릭터 생성
-    3. 원본 이미지를 S3에 업로드
-    4. 생성된 이미지를 S3에 업로드
-    5. 최종 URL 반환
+    3. 생성된 이미지를 S3에 업로드
+    4. 최종 URL 반환 (원본 이미지는 저장하지 않음)
     """
     try:
         logger.info(f"🎨 Cat character generation request for user: {user_id}")
@@ -78,14 +76,7 @@ async def generate_cat_character(
         
         logger.info(f"✅ Cat character generated: {len(generated_image_bytes)} bytes")
         
-        # 3. 원본 이미지를 S3에 업로드
-        logger.info("📤 Uploading original image to S3...")
-        # UploadFile을 다시 읽을 수 있도록 seek
-        await image.seek(0)
-        original_url = await s3_service.upload_profile_image(image, user_id)
-        logger.info(f"✅ Original image uploaded: {original_url}")
-        
-        # 4. 생성된 이미지를 S3에 업로드
+        # 3. 생성된 이미지를 S3에 업로드
         logger.info("📤 Uploading generated image to S3...")
         generated_url = await s3_service.upload_cat_character_image(
             generated_image_bytes, 
@@ -93,13 +84,12 @@ async def generate_cat_character(
         )
         logger.info(f"✅ Generated image uploaded: {generated_url}")
         
-        # 5. base64 인코딩 (프론트엔드에서 바로 표시 가능)
+        # 4. base64 인코딩 (프론트엔드에서 바로 표시 가능)
         generated_image_base64 = base64.b64encode(generated_image_bytes).decode('utf-8')
         
         return success_response(
             data={
                 "user_id": user_id,
-                "original_url": original_url,
                 "generated_url": generated_url,
                 "generated_image_base64": generated_image_base64  # 프론트엔드에서 바로 표시 가능
             },
