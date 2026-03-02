@@ -179,6 +179,15 @@ async def signup(
             logger.info("📦 Processing as MULTIPART")
             form = await request.form()
             
+            # 🔍 DEBUG: 모든 form 필드 출력
+            logger.info(f"🔍 DEBUG: All form keys: {list(form.keys())}")
+            for key in form.keys():
+                value = form.get(key)
+                if hasattr(value, 'filename'):
+                    logger.info(f"🔍 DEBUG: {key} = FILE({value.filename}, {value.content_type})")
+                else:
+                    logger.info(f"🔍 DEBUG: {key} = {value}")
+            
             user_id = form.get("user_id")
             email = form.get("email")
             nickname = form.get("nickname")
@@ -193,6 +202,11 @@ async def signup(
             
             logger.info(f"📝 User: {user_id}, {email}, {nickname}, {phone_number}")
             logger.info(f"🎨 Cat: {cat_pattern}, {cat_color}")
+            
+            # 🔍 DEBUG: 파일 필드 상태 확인
+            logger.info(f"🔍 DEBUG: profile_image = {profile_image}, has filename? {hasattr(profile_image, 'filename') if profile_image else False}")
+            logger.info(f"🔍 DEBUG: meow_audio = {meow_audio}, has filename? {hasattr(meow_audio, 'filename') if meow_audio else False}")
+            logger.info(f"🔍 DEBUG: train_voice = {train_voice}, count: {len(train_voice) if train_voice else 0}")
             
             # 파일 업로드 처리
             profile_image_url = None
@@ -661,8 +675,14 @@ async def update_my_profile(
             logger.info("📦 Processing as MULTIPART")
             form = await request.form()
             
-            # 디버깅: form 전체 키 출력
-            logger.info(f"🔍 Form keys: {list(form.keys())}")
+            # 🔍 DEBUG: 모든 form 필드 출력
+            logger.info(f"🔍 DEBUG: All form keys: {list(form.keys())}")
+            for key in form.keys():
+                value = form.get(key)
+                if hasattr(value, 'filename'):
+                    logger.info(f"🔍 DEBUG: {key} = FILE({value.filename}, {value.content_type})")
+                else:
+                    logger.info(f"🔍 DEBUG: {key} = {value}")
             
             email = form.get("email")
             nickname = form.get("nickname")

@@ -339,7 +339,15 @@ class UserService:
             logger.error(f"❌ Failed to delete DynamoDB friendships: {e}")
             # 계속 진행
         
-        # 3. S3에서 사용자 파일 삭제
+        # 2-1. DynamoDB OutboxEvents 삭제
+        try:
+            await dynamodb_service.delete_user_outbox_events(user_id)
+            logger.info(f"✅ DynamoDB OutboxEvents deleted for user: {user_id}")
+        except Exception as e:
+            logger.error(f"❌ Failed to delete DynamoDB OutboxEvents: {e}")
+            # 계속 진행
+        
+        # 3. S3에서 사용자 파일 삭제 (ameowzon-test-files + amz-bgm)
         try:
             s3_service.delete_user_files(user_id)
             logger.info(f"✅ S3 files deleted for user: {user_id}")
@@ -347,11 +355,12 @@ class UserService:
             logger.error(f"❌ Failed to delete S3 files: {e}")
             # 계속 진행
         
-        # 4. RDS에서 사용자 삭제
+        # 4. RDS에서 사용자 삭제 (challenge_submissions는 CASCADE로 자동 삭제)
         try:
             self.db.delete(db_user)
             self.db.commit()
             logger.info(f"✅ RDS user deleted: {user_id}")
+            logger.info(f"✅ RDS challenge_submissions auto-deleted (CASCADE)")
             return True
         except Exception as e:
             logger.error(f"❌ Failed to delete user from RDS: {e}")

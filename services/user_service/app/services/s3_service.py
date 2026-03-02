@@ -639,8 +639,11 @@ class S3Service:
             return False
 
         try:
-            # user_id가 포함된 모든 파일 찾기
-            prefixes = [
+            deleted_count = 0
+            
+            # 1. ameowzon-test-files 버킷에서 파일 삭제
+            logger.info(f"🗑️ Deleting files from bucket: {self.bucket_name}")
+            prefixes_main = [
                 f"profiles/images/{user_id}",  # 프로필 이미지
                 f"profiles/audio/meow/{user_id}",  # 야옹 소리
                 f"profiles/audio/train/{user_id}",  # train voice
@@ -649,30 +652,40 @@ class S3Service:
                 f"cat-characters/{user_id}",  # 고양이 캐릭터 이미지
             ]
 
-            deleted_count = 0
-
-            for prefix in prefixes:
-                # 해당 prefix로 시작하는 모든 객체 조회
+            for prefix in prefixes_main:
+                deleted_count += self._delete_files_by_prefix(self.bucket_name, prefix)
+            
+            # 2. amz-bgm 버킷에서 파일 삭제
+            logger.info(f"🗑️ Deleting files from bucket: amz-bgm")
+            bgm_bucket = "amz-bgm"
+            
+            # meow/enroll/{user_id}/ 삭제 (병합된 train voice)
+            deleted_count += self._delete_files_by_prefix(bgm_bucket, f"meow/enroll/{user_id}")
+            
+            # meow/daily_outputs에서 user_id 포함된 파일 찾아서 삭제 (BGM 파일)
+            try:
                 paginator = self.s3_client.get_paginator('list_objects_v2')
-                pages = paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
-
+                pages = paginator.paginate(Bucket=bgm_bucket, Prefix="meow/daily_outputs/")
+                
                 for page in pages:
                     if 'Contents' not in page:
                         continue
-
-                    # 객체 삭제
+                    
                     for obj in page['Contents']:
-                        try:
-                            self.s3_client.delete_object(
-                                Bucket=self.bucket_name,
-                                Key=obj['Key']
-                            )
-                            deleted_count += 1
-                            logger.info(f"Deleted: {obj['Key']}")
-                        except Exception as e:
-                            logger.error(f"Failed to delete {obj['Key']}: {e}")
+                        # 파일 경로에 user_id가 포함되어 있으면 삭제
+                        if user_id in obj['Key']:
+                            try:
+                                self.s3_client.delete_object(Bucket=bgm_bucket, Key=obj['Key'])
+                                deleted_count += 1
+                                logger.info(f"Deleted from amz-bgm: {obj['Key']}")
+                            except Exception as e:
+                                logger.error(f"Failed to delete {obj['Key']}: {e}")
+            except ClientError as e:
+                logger.error(f"Failed to scan amz-bgm bucket: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error scanning amz-bgm: {e}")
 
-            logger.info(f"Total {deleted_count} files deleted for user {user_id}")
+            logger.info(f"✅ Total {deleted_count} files deleted for user {user_id}")
             return True
 
         except ClientError as e:
@@ -681,6 +694,31 @@ class S3Service:
         except Exception as e:
             logger.error(f"Unexpected error during delete user files: {e}")
             return False
+    
+    def _delete_files_by_prefix(self, bucket: str, prefix: str) -> int:
+        """특정 prefix의 모든 파일 삭제"""
+        deleted_count = 0
+        try:
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=bucket, Prefix=prefix)
+            
+            for page in pages:
+                if 'Contents' not in page:
+                    continue
+                
+                for obj in page['Contents']:
+                    try:
+                        self.s3_client.delete_object(Bucket=bucket, Key=obj['Key'])
+                        deleted_count += 1
+                        logger.info(f"Deleted: {obj['Key']}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete {obj['Key']}: {e}")
+        except ClientError as e:
+            logger.error(f"Failed to delete files with prefix {prefix}: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error deleting prefix {prefix}: {e}")
+        
+        return deleted_count
 
 
 

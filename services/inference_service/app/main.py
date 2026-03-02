@@ -1,1 +1,0 @@
-# Inference Service Main Application

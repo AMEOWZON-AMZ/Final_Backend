@@ -298,13 +298,14 @@ class ChallengeService:
         if not challenge:
             raise HTTPException(status_code=404, detail="Challenge not found")
         
+        # 날짜 제한 제거 (테스트/데모용)
         # 오늘 날짜 챌린지인지 확인 (한국 시간 기준)
-        today_kst = get_today_kst()
-        if challenge.challenge_date != today_kst:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Can only submit to today's challenge. Today (KST): {today_kst}, Challenge date: {challenge.challenge_date}"
-            )
+        # today_kst = get_today_kst()
+        # if challenge.challenge_date != today_kst:
+        #     raise HTTPException(
+        #         status_code=400,
+        #         detail=f"Can only submit to today's challenge. Today (KST): {today_kst}, Challenge date: {challenge.challenge_date}"
+        #     )
         
         # GPS 정보 유무 확인
         has_gps = latitude is not None and longitude is not None

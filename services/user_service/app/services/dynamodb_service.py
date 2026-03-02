@@ -9,6 +9,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from app.core.config import settings
 from botocore.exceptions import ClientError
+from boto3.dynamodb.conditions import Key, Attr
 import logging
 
 # .env 파일 명시적으로 로드
@@ -747,11 +748,23 @@ class DynamoDBService:
                 logger.info(f"Deleted: {item['user_id']} -> {item['friend_user_id']}")
             
             # 2. friend_user_id가 user_id인 모든 레코드 삭제 (다른 사람이 주체인 관계)
-            # GSI를 사용하여 조회
-            response = self.friends_table.query(
-                IndexName='FriendUserIdIndex',
-                KeyConditionExpression=Key('friend_user_id').eq(user_id)
-            )
+            # GSI가 있으면 Query 사용, 없으면 Scan 사용
+            try:
+                # GSI 사용 시도
+                response = self.friends_table.query(
+                    IndexName='FriendUserIdIndex',
+                    KeyConditionExpression=Key('friend_user_id').eq(user_id)
+                )
+                logger.info(f"✅ Using GSI (FriendUserIdIndex) for reverse lookup")
+            except ClientError as e:
+                if e.response['Error']['Code'] == 'ValidationException':
+                    # GSI가 없으면 Scan 사용 (성능 저하)
+                    logger.warning(f"⚠️ GSI not found, using Scan (slower)")
+                    response = self.friends_table.scan(
+                        FilterExpression=Attr('friend_user_id').eq(user_id)
+                    )
+                else:
+                    raise e
             
             for item in response.get('Items', []):
                 self.friends_table.delete_item(
@@ -762,6 +775,30 @@ class DynamoDBService:
                 )
                 deleted_count += 1
                 logger.info(f"Deleted: {item['user_id']} -> {item['friend_user_id']}")
+            
+            # Pagination 처리 (Scan의 경우)
+            while 'LastEvaluatedKey' in response:
+                try:
+                    response = self.friends_table.query(
+                        IndexName='FriendUserIdIndex',
+                        KeyConditionExpression=Key('friend_user_id').eq(user_id),
+                        ExclusiveStartKey=response['LastEvaluatedKey']
+                    )
+                except:
+                    response = self.friends_table.scan(
+                        FilterExpression=Attr('friend_user_id').eq(user_id),
+                        ExclusiveStartKey=response['LastEvaluatedKey']
+                    )
+                
+                for item in response.get('Items', []):
+                    self.friends_table.delete_item(
+                        Key={
+                            'user_id': item['user_id'],
+                            'friend_user_id': item['friend_user_id']
+                        }
+                    )
+                    deleted_count += 1
+                    logger.info(f"Deleted: {item['user_id']} -> {item['friend_user_id']}")
             
             logger.info(f"✅ Total {deleted_count} friendship records deleted for user: {user_id}")
             return True
@@ -840,6 +877,90 @@ class DynamoDBService:
             return False
         except Exception as e:
             logger.error(f"❌ Unexpected error updating BGM URL: {e}")
+            return False
+    
+    async def delete_user_outbox_events(self, user_id: str) -> bool:
+        """사용자 관련 모든 OutboxEvents 삭제"""
+        if not self.dynamodb:
+            logger.warning("DynamoDB not initialized")
+            return False
+        
+        try:
+            outbox_table = self.dynamodb.Table('OutboxEvents')
+            deleted_count = 0
+            
+            # to_user_id가 user_id인 이벤트 삭제
+            logger.info(f"🔍 Scanning OutboxEvents for to_user_id={user_id}")
+            response = outbox_table.scan(
+                FilterExpression=Attr('payload').exists() & Attr('payload.to_user_id').eq(user_id)
+            )
+            
+            for item in response.get('Items', []):
+                try:
+                    outbox_table.delete_item(
+                        Key={'pk': item['pk'], 'sk': item['sk']}
+                    )
+                    deleted_count += 1
+                    logger.info(f"Deleted event: {item['pk']}")
+                except Exception as e:
+                    logger.error(f"Failed to delete event {item['pk']}: {e}")
+            
+            # Pagination 처리
+            while 'LastEvaluatedKey' in response:
+                response = outbox_table.scan(
+                    FilterExpression=Attr('payload').exists() & Attr('payload.to_user_id').eq(user_id),
+                    ExclusiveStartKey=response['LastEvaluatedKey']
+                )
+                for item in response.get('Items', []):
+                    try:
+                        outbox_table.delete_item(
+                            Key={'pk': item['pk'], 'sk': item['sk']}
+                        )
+                        deleted_count += 1
+                        logger.info(f"Deleted event: {item['pk']}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete event {item['pk']}: {e}")
+            
+            # from_user_id가 user_id인 이벤트 삭제
+            logger.info(f"🔍 Scanning OutboxEvents for from_user_id={user_id}")
+            response = outbox_table.scan(
+                FilterExpression=Attr('payload').exists() & Attr('payload.data').exists() & Attr('payload.data.from_user_id').eq(user_id)
+            )
+            
+            for item in response.get('Items', []):
+                try:
+                    outbox_table.delete_item(
+                        Key={'pk': item['pk'], 'sk': item['sk']}
+                    )
+                    deleted_count += 1
+                    logger.info(f"Deleted event: {item['pk']}")
+                except Exception as e:
+                    logger.error(f"Failed to delete event {item['pk']}: {e}")
+            
+            # Pagination 처리
+            while 'LastEvaluatedKey' in response:
+                response = outbox_table.scan(
+                    FilterExpression=Attr('payload').exists() & Attr('payload.data').exists() & Attr('payload.data.from_user_id').eq(user_id),
+                    ExclusiveStartKey=response['LastEvaluatedKey']
+                )
+                for item in response.get('Items', []):
+                    try:
+                        outbox_table.delete_item(
+                            Key={'pk': item['pk'], 'sk': item['sk']}
+                        )
+                        deleted_count += 1
+                        logger.info(f"Deleted event: {item['pk']}")
+                    except Exception as e:
+                        logger.error(f"Failed to delete event {item['pk']}: {e}")
+            
+            logger.info(f"✅ Deleted {deleted_count} outbox events for user: {user_id}")
+            return True
+            
+        except ClientError as e:
+            logger.error(f"❌ Failed to delete outbox events: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Unexpected error during outbox events deletion: {e}")
             return False
 
 

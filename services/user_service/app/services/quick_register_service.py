@@ -201,6 +201,29 @@ class QuickRegisterService:
                 friend_added = True
                 logger.info(f"✅ Quick register: Added friend relationship {new_user_id} ↔ {target_user_id}")
                 
+                # 5. OutboxEvents에 친구 수락 이벤트 추가 (Push 알림용)
+                try:
+                    from app.services.friend_event_service import friend_event_service
+                    
+                    # 새 사용자에게 알림: "OOO님과 친구가 되었습니다"
+                    friend_event_service.enqueue_friend_accepted(
+                        to_user_id=new_user_id,
+                        from_user_id=target_user_id,
+                        from_nickname=target_user.nickname
+                    )
+                    
+                    # 대상 사용자에게 알림: "OOO님과 친구가 되었습니다"
+                    friend_event_service.enqueue_friend_accepted(
+                        to_user_id=target_user_id,
+                        from_user_id=new_user_id,
+                        from_nickname=nickname
+                    )
+                    
+                    logger.info(f"✅ Friend accepted events enqueued for both users")
+                except Exception as e:
+                    logger.error(f"❌ Failed to enqueue friend events: {e}")
+                    # 이벤트 추가 실패해도 친구 관계는 이미 추가됨
+                
             except Exception as e:
                 logger.error(f"❌ Failed to add friend relationship: {e}")
                 logger.exception(e)  # 전체 스택 트레이스 출력
