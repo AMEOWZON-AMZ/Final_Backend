@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: vision-validate-svc
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: vision-validate
   ports:
