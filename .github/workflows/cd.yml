@@ -1,0 +1,134 @@
+﻿name: CD
+
+on:
+  # PR에서는 실행되지 않음. dev/main push에서만 CD 수행
+  push:
+    branches:
+      - dev
+      - main
+
+# OIDC + 코드 읽기 권한
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+# 배포 대상 서비스 정의 (deployment|dockerfile|context)
+# TEMP: FCM secret 복구 전까지 push-worker 제외
+env:
+  SERVICES_JSON: |
+    [
+      {"deployment":"msg-service","dockerfile":"services/message_service/Dockerfile","context":"."},
+      {"deployment":"inference-service","dockerfile":"services/inference_service/Dockerfile","context":"."},
+      {"deployment":"vision-service","dockerfile":"services/vision_service/Dockerfile","context":"."},
+      {"deployment":"inference-batch","dockerfile":"services/inference_batch/Dockerfile","context":"services/inference_batch"}
+    ]
+
+jobs:
+  deploy:
+    name: Build, Push, Deploy (Multi-image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 브랜치에 따라 대상 namespace 결정
+      - name: Set target environment
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" = "dev" ]; then
+            echo "namespace=${{ secrets.STAGING_NAMESPACE }}" >> "$GITHUB_OUTPUT"
+            echo "deploy_env=staging" >> "$GITHUB_OUTPUT"
+          elif [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "namespace=${{ secrets.PROD_NAMESPACE }}" >> "$GITHUB_OUTPUT"
+            echo "deploy_env=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported branch: ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+
+      # jq 설치 (필요 시)
+      - name: Ensure jq installed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y jq
+          fi
+          jq --version
+
+      # AWS Access Key 없이 OIDC AssumeRole
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: gha-cd-${{ github.run_id }}
+
+      # ECR 로그인
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # kubectl 설치
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      # EKS kubeconfig 설정
+      - name: Update kubeconfig for EKS
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig \
+            --region "${{ secrets.AWS_REGION }}" \
+            --name "${{ secrets.EKS_CLUSTER_NAME }}"
+
+      # 서비스별 이미지 빌드/푸시 후, 각 Deployment에 순차 적용 + rollout 확인
+      # 하나라도 실패하면 즉시 pipeline 실패
+      - name: Build, push, deploy each service sequentially
+        shell: bash
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ECR_REPO: ${{ secrets.ECR_REPO }}
+          NAMESPACE: ${{ steps.target.outputs.namespace }}
+        run: |
+          set -euo pipefail
+
+          echo "Target namespace: ${NAMESPACE}"
+          echo "ECR repo: ${ECR_REGISTRY}/${ECR_REPO}"
+
+          echo "${SERVICES_JSON}" | jq -c '.[]' | while read -r svc; do
+            deploy=$(echo "$svc" | jq -r '.deployment')
+            dockerfile=$(echo "$svc" | jq -r '.dockerfile')
+            context=$(echo "$svc" | jq -r '.context')
+
+            image_uri="${ECR_REGISTRY}/${ECR_REPO}:${deploy}-${GITHUB_RUN_NUMBER}"
+            echo "---"
+            echo "Building ${deploy}"
+            echo "Dockerfile: ${dockerfile}"
+            echo "Context: ${context}"
+
+            docker build \
+              -f "${dockerfile}" \
+              -t "${image_uri}" \
+              "${context}"
+
+            docker push "${image_uri}"
+            echo "Deploying ${deploy} -> ${image_uri}"
+            kubectl -n "${NAMESPACE}" set image "deployment/${deploy}" app="${image_uri}"
+
+            echo "Waiting rollout for deployment/${deploy}"
+            kubectl -n "${NAMESPACE}" rollout status "deployment/${deploy}" --timeout=300s
+          done
+
+          echo "All selected deployments updated successfully."
+
+
