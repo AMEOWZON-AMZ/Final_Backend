@@ -7,7 +7,6 @@ on:
       - dev
       - main
 
-
 permissions:
   id-token: write
   contents: read
@@ -35,12 +34,10 @@ env:
       {"kind":"deployment","name":"vision-validate","container":"vision-validate","image_key":"vision-validate"},
       {"kind":"cronjob","name":"inference-batch","container":"inference-batch","image_key":"inference-batch"},
       {"kind":"cronjob","name":"daily-status-sync","container":"daily-status-sync","image_key":"inference-service"}
-
     ]
 
 jobs:
   deploy:
-
     name: Build, Push, Deploy (Namespaced)
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -48,7 +45,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
 
       - name: Set target environment
         id: target
@@ -75,7 +71,6 @@ jobs:
             sudo apt-get install -y jq
           fi
           jq --version
-
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -128,29 +123,6 @@ jobs:
       - name: Update workloads and verify
         shell: bash
         env:
-        run: |
-          set -euo pipefail
-
-          image_map='{}'
-          while read -r item; do
-            key=$(echo "$item" | jq -r '.key')
-            dockerfile=$(echo "$item" | jq -r '.dockerfile')
-            context=$(echo "$item" | jq -r '.context')
-
-            image_uri="${ECR_REGISTRY}/${ECR_REPO}:${key}-${GITHUB_RUN_NUMBER}"
-
-            echo "Building ${key}"
-            docker build -f "${dockerfile}" -t "${image_uri}" "${context}"
-            docker push "${image_uri}"
-
-            image_map=$(echo "$image_map" | jq --arg k "$key" --arg v "$image_uri" '. + {($k): $v}')
-          done < <(echo "${IMAGES_JSON}" | jq -c '.[]')
-
-          echo "image_map=${image_map}" >> "$GITHUB_OUTPUT"
-
-      - name: Update workloads and verify
-        shell: bash
-        env:
           NAMESPACE: ${{ steps.target.outputs.namespace }}
           IMAGE_MAP: ${{ steps.build.outputs.image_map }}
         run: |
@@ -185,5 +157,3 @@ jobs:
           done
 
           echo "All workloads updated successfully."
-
-
