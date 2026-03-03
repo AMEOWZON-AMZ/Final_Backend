@@ -94,6 +94,7 @@ class UserService:
             user_id=signup_data.user_id,  # 프론트엔드에서 받은 Google/Cognito sub 사용
             email=signup_data.email,
             nickname=signup_data.nickname,
+            phone_number=signup_data.phone_number if hasattr(signup_data, 'phone_number') else None,  # 전화번호 추가
             provider="google",  # 또는 "cognito"
             friend_code=friend_code,
             # 고양이 프로필 정보
@@ -181,6 +182,9 @@ class UserService:
                 except Exception as e:
                     logger.warning(f"Failed to generate presigned URL for meow audio: {e}")
             
+            # BGM URL은 이미 presigned URL이므로 그대로 사용
+            bgm_url = friend_data.get('bgm_url')
+            
             lobby_friend = LobbyFriend(
                 user_id=friend_data.get('friend_user_id'),
                 email=friend_data.get('email', ''),
@@ -191,6 +195,7 @@ class UserService:
                 meow_audio_url=meow_audio_url,
                 train_voice_urls=friend_data.get('train_voice_urls', []),
                 daily_status=friend_data.get('daily_status'),
+                bgm_url=bgm_url,
                 created_at_timestamp=friend_data.get('created_at', 0),
                 updated_at_timestamp=friend_data.get('updated_at', 0)
             )
@@ -299,22 +304,33 @@ class UserService:
         self.db.commit()
         self.db.refresh(db_user)
         
-        # DynamoDB 친구 레코드 동기화 (비정규화된 프로필 정보 업데이트)
-        profile_data = {
-            'email': db_user.email,
-            'nickname': db_user.nickname,
-            'profile_image_url': db_user.profile_image_url,
-            'cat_pattern': db_user.cat_pattern,
-            'cat_color': db_user.cat_color,
-            'meow_audio_url': db_user.meow_audio_url,
-            'train_voice_urls': train_voice_urls
-        }
+        # DynamoDB 친구 레코드 동기화 (실제로 업데이트된 필드만 전달)
+        profile_data = {}
         
-        try:
-            await dynamodb_service.update_user_profile_in_friends(user_id, profile_data)
-        except Exception as e:
-            logger.error(f"Failed to sync profile to DynamoDB: {str(e)}")
-            # DynamoDB 동기화 실패해도 RDS 업데이트는 성공으로 처리
+        # update_data에 포함된 필드만 DynamoDB에 동기화
+        if 'email' in update_data:
+            profile_data['email'] = db_user.email
+        if 'nickname' in update_data:
+            profile_data['nickname'] = db_user.nickname
+        if 'profile_image_url' in update_data:
+            profile_data['profile_image_url'] = db_user.profile_image_url
+        if 'cat_pattern' in update_data:
+            profile_data['cat_pattern'] = db_user.cat_pattern
+        if 'cat_color' in update_data:
+            profile_data['cat_color'] = db_user.cat_color
+        if 'meow_audio_url' in update_data:
+            profile_data['meow_audio_url'] = db_user.meow_audio_url
+        if 'train_voice_urls' in update_data:
+            profile_data['train_voice_urls'] = train_voice_urls
+        
+        # 업데이트할 필드가 있을 때만 DynamoDB 동기화
+        if profile_data:
+            try:
+                logger.info(f"🔄 Syncing to DynamoDB: {list(profile_data.keys())}")
+                await dynamodb_service.update_user_profile_in_friends(user_id, profile_data)
+            except Exception as e:
+                logger.error(f"Failed to sync profile to DynamoDB: {str(e)}")
+                # DynamoDB 동기화 실패해도 RDS 업데이트는 성공으로 처리
         
         return db_user
     
@@ -675,6 +691,9 @@ class UserService:
                 except Exception as e:
                     logger.warning(f"Failed to generate presigned URL for friend meow audio: {e}")
             
+            # BGM URL은 이미 presigned URL이므로 그대로 사용
+            bgm_url = data.get('bgm_url')
+            
             friend = {
                 'user_id': data.get('friend_user_id'),
                 'nickname': data.get('nickname', ''),
@@ -684,6 +703,7 @@ class UserService:
                 'meow_audio_url': meow_audio_url,
                 'train_voice_urls': data.get('train_voice_urls', []),
                 'daily_status': data.get('daily_status', ''),
+                'bgm_url': bgm_url,
                 'created_at': data.get('created_at', 0)
             }
             friends_list.append(friend)
