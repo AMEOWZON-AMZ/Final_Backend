@@ -7,7 +7,6 @@ on:
       - dev
       - main
 
-# OIDC + 코드 읽기 권한
 permissions:
   id-token: write
   contents: read
@@ -16,20 +15,30 @@ concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: true
 
-# 배포 대상 서비스 정의 (deployment|dockerfile|context)
-# TEMP: FCM secret 복구 전까지 push-worker 제외
 env:
-  SERVICES_JSON: |
+  # 이미지 빌드 정의 (key|dockerfile|context)
+  IMAGES_JSON: |
     [
-      {"deployment":"msg-service","dockerfile":"services/message_service/Dockerfile","context":"."},
-      {"deployment":"inference-service","dockerfile":"services/inference_service/Dockerfile","context":"."},
-      {"deployment":"vision-service","dockerfile":"services/vision_service/Dockerfile","context":"."},
-      {"deployment":"inference-batch","dockerfile":"services/inference_batch/Dockerfile","context":"services/inference_batch"}
+      {"key":"msg-service","dockerfile":"services/message_service/Dockerfile","context":"."},
+      {"key":"inference-service","dockerfile":"services/inference_service/Dockerfile","context":"."},
+      {"key":"vision-validate","dockerfile":"services/vision_service/Dockerfile","context":"."},
+      {"key":"inference-batch","dockerfile":"services/inference_batch/Dockerfile","context":"services/inference_batch"}
+    ]
+
+  # 업데이트 대상 정의 (kind|name|container|image_key)
+  # TEMP: FCM secret 복구 전까지 push-worker 제외
+  TARGETS_JSON: |
+    [
+      {"kind":"deployment","name":"msg-service","container":"msg-service","image_key":"msg-service"},
+      {"kind":"deployment","name":"inference-service","container":"inference-service","image_key":"inference-service"},
+      {"kind":"deployment","name":"vision-validate","container":"vision-validate","image_key":"vision-validate"},
+      {"kind":"cronjob","name":"inference-batch","container":"inference-batch","image_key":"inference-batch"},
+      {"kind":"cronjob","name":"daily-status-sync","container":"daily-status-sync","image_key":"inference-service"}
     ]
 
 jobs:
   deploy:
-    name: Build, Push, Deploy (Multi-image)
+    name: Build, Push, Deploy (Namespaced)
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -37,7 +46,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 브랜치에 따라 대상 namespace 결정
       - name: Set target environment
         id: target
         shell: bash
@@ -54,7 +62,6 @@ jobs:
             exit 1
           fi
 
-      # jq 설치 (필요 시)
       - name: Ensure jq installed
         shell: bash
         run: |
@@ -65,7 +72,6 @@ jobs:
           fi
           jq --version
 
-      # AWS Access Key 없이 OIDC AssumeRole
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -73,16 +79,13 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           role-session-name: gha-cd-${{ github.run_id }}
 
-      # ECR 로그인
       - name: Login to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # kubectl 설치
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
 
-      # EKS kubeconfig 설정
       - name: Update kubeconfig for EKS
         shell: bash
         run: |
@@ -91,44 +94,67 @@ jobs:
             --region "${{ secrets.AWS_REGION }}" \
             --name "${{ secrets.EKS_CLUSTER_NAME }}"
 
-      # 서비스별 이미지 빌드/푸시 후, 각 Deployment에 순차 적용 + rollout 확인
-      # 하나라도 실패하면 즉시 pipeline 실패
-      - name: Build, push, deploy each service sequentially
+      - name: Build and push images
+        id: build
         shell: bash
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           ECR_REPO: ${{ secrets.ECR_REPO }}
+        run: |
+          set -euo pipefail
+
+          image_map='{}'
+          while read -r item; do
+            key=$(echo "$item" | jq -r '.key')
+            dockerfile=$(echo "$item" | jq -r '.dockerfile')
+            context=$(echo "$item" | jq -r '.context')
+
+            image_uri="${ECR_REGISTRY}/${ECR_REPO}:${key}-${GITHUB_RUN_NUMBER}"
+
+            echo "Building ${key}"
+            docker build -f "${dockerfile}" -t "${image_uri}" "${context}"
+            docker push "${image_uri}"
+
+            image_map=$(echo "$image_map" | jq --arg k "$key" --arg v "$image_uri" '. + {($k): $v}')
+          done < <(echo "${IMAGES_JSON}" | jq -c '.[]')
+
+          echo "image_map=${image_map}" >> "$GITHUB_OUTPUT"
+
+      - name: Update workloads and verify
+        shell: bash
+        env:
           NAMESPACE: ${{ steps.target.outputs.namespace }}
+          IMAGE_MAP: ${{ steps.build.outputs.image_map }}
         run: |
           set -euo pipefail
 
           echo "Target namespace: ${NAMESPACE}"
-          echo "ECR repo: ${ECR_REGISTRY}/${ECR_REPO}"
 
-          echo "${SERVICES_JSON}" | jq -c '.[]' | while read -r svc; do
-            deploy=$(echo "$svc" | jq -r '.deployment')
-            dockerfile=$(echo "$svc" | jq -r '.dockerfile')
-            context=$(echo "$svc" | jq -r '.context')
+          echo "${TARGETS_JSON}" | jq -c '.[]' | while read -r t; do
+            kind=$(echo "$t" | jq -r '.kind')
+            name=$(echo "$t" | jq -r '.name')
+            container=$(echo "$t" | jq -r '.container')
+            image_key=$(echo "$t" | jq -r '.image_key')
+            image_uri=$(echo "$IMAGE_MAP" | jq -r --arg k "$image_key" '.[$k]')
 
-            image_uri="${ECR_REGISTRY}/${ECR_REPO}:${deploy}-${GITHUB_RUN_NUMBER}"
-            echo "---"
-            echo "Building ${deploy}"
-            echo "Dockerfile: ${dockerfile}"
-            echo "Context: ${context}"
+            if [ -z "$image_uri" ] || [ "$image_uri" = "null" ]; then
+              echo "No built image for key: ${image_key}"
+              exit 1
+            fi
 
-            docker build \
-              -f "${dockerfile}" \
-              -t "${image_uri}" \
-              "${context}"
+            echo "Updating ${kind}/${name} (${container}) -> ${image_uri}"
+            kubectl -n "${NAMESPACE}" set image "${kind}/${name}" "${container}=${image_uri}"
 
-            docker push "${image_uri}"
-            echo "Deploying ${deploy} -> ${image_uri}"
-            kubectl -n "${NAMESPACE}" set image "deployment/${deploy}" app="${image_uri}"
-
-            echo "Waiting rollout for deployment/${deploy}"
-            kubectl -n "${NAMESPACE}" rollout status "deployment/${deploy}" --timeout=300s
+            if [ "$kind" = "deployment" ]; then
+              kubectl -n "${NAMESPACE}" rollout status "deployment/${name}" --timeout=300s
+            else
+              applied=$(kubectl -n "${NAMESPACE}" get "cronjob/${name}" -o jsonpath="{.spec.jobTemplate.spec.template.spec.containers[?(@.name=='${container}')].image}")
+              if [ "$applied" != "$image_uri" ]; then
+                echo "CronJob image verify failed: expected=${image_uri}, actual=${applied}"
+                exit 1
+              fi
+            fi
           done
 
-          echo "All selected deployments updated successfully."
-
+          echo "All workloads updated successfully."
 
