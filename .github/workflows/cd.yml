@@ -98,6 +98,29 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
           ECR_REPO: ${{ secrets.ECR_REPO }}
+        run: |
+          set -euo pipefail
+
+          image_map='{}'
+          while read -r item; do
+            key=$(echo "$item" | jq -r '.key')
+            dockerfile=$(echo "$item" | jq -r '.dockerfile')
+            context=$(echo "$item" | jq -r '.context')
+
+            image_uri="${ECR_REGISTRY}/${ECR_REPO}:${key}-${GITHUB_RUN_NUMBER}"
+
+            echo "Building ${key}"
+            docker build -f "${dockerfile}" -t "${image_uri}" "${context}"
+            docker push "${image_uri}"
+
+            image_map=$(echo "$image_map" | jq -c --arg k "$key" --arg v "$image_uri" '. + {($k): $v}')
+          done < <(echo "${IMAGES_JSON}" | jq -c '.[]')
+
+          echo "image_map=${image_map}" >> "$GITHUB_OUTPUT"
+
+      - name: Update workloads and verify
+        shell: bash
+        env:
           NAMESPACE: ${{ steps.target.outputs.namespace }}
         run: |
           set -euo pipefail
@@ -130,5 +153,6 @@ jobs:
           done
 
           echo "All selected deployments updated successfully."
+
 
 
